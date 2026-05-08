@@ -31,4 +31,4 @@ def run_sql(conn: SnowflakeConnection, sql: str) -> list[dict[str, Any]]:
         if cur.description is None:
             return []
         columns = [c[0] for c in cur.description]
-        return [dict(zip(columns, row)) for row in cur.fetchall()]
+        return [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]

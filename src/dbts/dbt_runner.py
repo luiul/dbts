@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from typing import Iterable
+from collections.abc import Iterable
 
 from dbts.config import (
     ConfigError,
@@ -25,9 +25,7 @@ def run(subcommand: str, args: Iterable[str], target_name: str, target: Target) 
     Returns dbt's exit code unchanged.
     """
     if shutil.which("dbt") is None:
-        raise ConfigError(
-            "dbt not found on PATH. Activate the venv where dbt-core is installed."
-        )
+        raise ConfigError("dbt not found on PATH. Activate the venv where dbt-core is installed.")
 
     project = dbt_project_dir()
     env = os.environ.copy()

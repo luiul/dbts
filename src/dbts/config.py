@@ -9,9 +9,33 @@ import yaml
 
 SANDBOX_DB_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*_SANDBOX_[A-Z0-9_]+$")
 
+ENV_VAR_PATTERN = re.compile(
+    r"""\{\{\s*env_var\(\s*['"](?P<name>[^'"]+)['"]\s*(?:,\s*['"](?P<default>[^'"]*)['"]\s*)?\)\s*\}\}"""
+)
+
 
 class ConfigError(Exception):
     pass
+
+
+def _render_env_vars(value: str) -> str:
+    """Substitute `{{ env_var('NAME', 'default') }}` against os.environ.
+
+    dbt projects often template the `profile:` field in dbt_project.yml. We only
+    support the env_var lookup since that's all that ever appears there.
+    """
+
+    def repl(match: re.Match[str]) -> str:
+        name = match.group("name")
+        default = match.group("default")
+        env_value = os.environ.get(name)
+        if env_value is not None:
+            return env_value
+        if default is not None:
+            return default
+        raise ConfigError(f"environment variable '{name}' is not set and dbt_project.yml provides no default")
+
+    return ENV_VAR_PATTERN.sub(repl, value)
 
 
 @dataclass(frozen=True)
@@ -30,10 +54,7 @@ class Target:
 def profiles_dir() -> Path:
     """Resolve $DBT_PROFILES_DIR or default to ~/.dbt."""
     env = os.environ.get("DBT_PROFILES_DIR")
-    if env:
-        path = Path(env).expanduser()
-    else:
-        path = Path.home() / ".dbt"
+    path = Path(env).expanduser() if env else Path.home() / ".dbt"
     if not path.is_dir():
         raise ConfigError(f"profiles directory not found: {path}")
     return path
@@ -55,10 +76,7 @@ def read_profile(profile: str, target: str) -> Target:
     outputs = profile_block.get("outputs") or {}
     if target not in outputs:
         available = ", ".join(sorted(outputs)) or "(none)"
-        raise ConfigError(
-            f"target '{target}' not found under profile '{profile}'. "
-            f"Available targets: {available}"
-        )
+        raise ConfigError(f"target '{target}' not found under profile '{profile}'. Available targets: {available}")
     cfg = outputs[target]
     try:
         return Target(
@@ -73,9 +91,7 @@ def read_profile(profile: str, target: str) -> Target:
             schema=cfg["schema"],
         )
     except KeyError as e:
-        raise ConfigError(
-            f"profile '{profile}', target '{target}' is missing required key: {e.args[0]}"
-        ) from e
+        raise ConfigError(f"profile '{profile}', target '{target}' is missing required key: {e.args[0]}") from e
 
 
 def sandbox_user(target: Target) -> str:
@@ -100,11 +116,23 @@ def dbt_project_dir(start: Path | None = None) -> Path:
     for candidate in [current, *current.parents]:
         if (candidate / "dbt_project.yml").is_file():
             return candidate
-    raise ConfigError(
-        f"could not find dbt_project.yml walking up from {current}. "
-        f"Run dbts from inside a dbt project."
-    )
+    raise ConfigError(f"could not find dbt_project.yml walking up from {current}. Run dbts from inside a dbt project.")
 
 
 def default_profile_name() -> str:
-    return os.environ.get("DBTS_PROFILE", "tardis_snowflake")
+    """Resolve the dbt profile name.
+
+    Order of precedence:
+      1. $DBTS_PROFILE
+      2. The `profile:` field in dbt_project.yml at the project root
+    """
+    env = os.environ.get("DBTS_PROFILE")
+    if env:
+        return env
+    project = dbt_project_dir()
+    raw = yaml.safe_load((project / "dbt_project.yml").read_text())
+    if not isinstance(raw, dict) or "profile" not in raw:
+        raise ConfigError(
+            "could not determine dbt profile name. Set $DBTS_PROFILE or add a `profile:` field to dbt_project.yml."
+        )
+    return _render_env_vars(str(raw["profile"]))

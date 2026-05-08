@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import getpass
+import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from rich.console import Console
@@ -20,10 +21,9 @@ from dbts.snowflake import connect, run_sql
 Source = Literal["staging", "live"]
 SOURCES: tuple[Source, ...] = ("staging", "live")
 
-COMMENT_PATTERN = re.compile(
-    r"^dbts: cloned from (?P<source>\w+) at (?P<ts>[\d:T+\-Z\.]+) by (?P<user>\S+)"
-)
+COMMENT_PATTERN = re.compile(r"^dbts: cloned from (?P<source>\w+) at (?P<ts>[\d:T+\-Z\.]+) by (?P<user>\S+)")
 
+log = logging.getLogger("dbts.clone")
 console = Console()
 
 
@@ -39,8 +39,12 @@ def _sql_quote(s: str) -> str:
     return s.replace("'", "''")
 
 
+def _sql_ident(s: str) -> str:
+    return '"' + s.replace('"', '""') + '"'
+
+
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _show_database(conn, db: str) -> dict | None:
@@ -67,32 +71,32 @@ def up(source: Source) -> int:
             comment = (existing.get("comment") or "").strip()
             match = COMMENT_PATTERN.match(comment)
             if match and match.group("source") == source:
-                console.print(
-                    f"[green]Sandbox already exists[/green]: {target_db} "
-                    f"(cloned from {source} at {match.group('ts')})"
+                log.info(
+                    "[green]Sandbox already exists[/green]: %s (cloned from %s at %s)",
+                    target_db,
+                    source,
+                    match.group("ts"),
                 )
                 return 0
             current_source = match.group("source") if match else "?"
-            console.print(
-                f"[red]Sandbox exists but was cloned from '{current_source}', "
-                f"not '{source}'.[/red] Run [bold]dbts refresh --from {source}[/bold] "
-                f"to re-clone."
+            log.error(
+                "[red]Sandbox exists but was cloned from '%s', not '%s'.[/red] "
+                "Run [bold]dbts refresh --from %s[/bold] to re-clone.",
+                current_source,
+                source,
+                source,
             )
             return 1
 
-        comment = (
-            f"dbts: cloned from {source} at {_now_iso()} "
-            f"by {getpass.getuser()}"
-        )
-        ddl = (
-            f"CREATE DATABASE {target_db} CLONE {source_db} "
-            f"COMMENT = '{_sql_quote(comment)}'"
-        )
-        console.print(f"[dim]{ddl}[/dim]")
+        comment = f"dbts: cloned from {source} at {_now_iso()} by {getpass.getuser()}"
+        ddl = f"CREATE DATABASE {_sql_ident(target_db)} CLONE {_sql_ident(source_db)} COMMENT = '{_sql_quote(comment)}'"
+        log.debug("[dim]%s[/dim]", ddl)
         run_sql(conn, ddl)
-        console.print(
-            f"[green]Created sandbox[/green] {target_db} "
-            f"(zero-copy clone of {source_db}, user={user})"
+        log.info(
+            "[green]Created sandbox[/green] %s (zero-copy clone of %s, user=%s)",
+            target_db,
+            source_db,
+            user,
         )
         return 0
     finally:
@@ -105,26 +109,24 @@ def refresh(source: Source) -> int:
     target_db = sandbox.database.upper()
     source_db = src.database.upper()
 
-    if not _confirm(
-        f"This will DROP and re-create {target_db} from {source_db}. Continue?"
-    ):
-        console.print("[yellow]Aborted.[/yellow]")
+    if not _confirm(f"This will DROP and re-create {target_db} from {source_db}. Continue?"):
+        log.warning("[yellow]Aborted.[/yellow]")
         return 1
 
     conn = connect(sandbox)
     try:
-        comment = (
-            f"dbts: cloned from {source} at {_now_iso()} "
-            f"by {getpass.getuser()}"
-        )
+        comment = f"dbts: cloned from {source} at {_now_iso()} by {getpass.getuser()}"
         ddl = (
-            f"CREATE OR REPLACE DATABASE {target_db} CLONE {source_db} "
+            f"CREATE OR REPLACE DATABASE {_sql_ident(target_db)} "
+            f"CLONE {_sql_ident(source_db)} "
             f"COMMENT = '{_sql_quote(comment)}'"
         )
-        console.print(f"[dim]{ddl}[/dim]")
+        log.debug("[dim]%s[/dim]", ddl)
         run_sql(conn, ddl)
-        console.print(
-            f"[green]Refreshed sandbox[/green] {target_db} from {source_db}"
+        log.info(
+            "[green]Refreshed sandbox[/green] %s from %s",
+            target_db,
+            source_db,
         )
         return 0
     finally:
@@ -136,15 +138,15 @@ def drop() -> int:
     target_db = sandbox.database.upper()
 
     if not _confirm(f"This will DROP DATABASE {target_db}. Continue?"):
-        console.print("[yellow]Aborted.[/yellow]")
+        log.warning("[yellow]Aborted.[/yellow]")
         return 1
 
     conn = connect(sandbox)
     try:
-        ddl = f"DROP DATABASE IF EXISTS {target_db}"
-        console.print(f"[dim]{ddl}[/dim]")
+        ddl = f"DROP DATABASE IF EXISTS {_sql_ident(target_db)}"
+        log.debug("[dim]%s[/dim]", ddl)
         run_sql(conn, ddl)
-        console.print(f"[green]Dropped sandbox[/green] {target_db}")
+        log.info("[green]Dropped sandbox[/green] %s", target_db)
         return 0
     finally:
         conn.close()
@@ -158,9 +160,9 @@ def status() -> int:
     try:
         existing = _show_database(conn, target_db)
         if not existing:
-            console.print(
-                f"[yellow]Sandbox not found:[/yellow] {target_db}\n"
-                f"Run [bold]dbts up --from staging|live[/bold] to create it."
+            log.warning(
+                "[yellow]Sandbox not found:[/yellow] %s\nRun [bold]dbts up --from staging|live[/bold] to create it.",
+                target_db,
             )
             return 1
 
@@ -202,7 +204,4 @@ def require_exists() -> None:
         return
     sandbox = _sandbox_target()
     target_db = sandbox.database.upper()
-    raise ConfigError(
-        f"sandbox database {target_db} does not exist. "
-        f"Run `dbts up --from staging|live` first."
-    )
+    raise ConfigError(f"sandbox database {target_db} does not exist. Run `dbts up --from staging|live` first.")
