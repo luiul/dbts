@@ -53,9 +53,15 @@ uv run ruff check .
 uv run ty check
 uv run pytest
 
-# Commit, tag, push
+# Commit (only if anything actually changed — pyproject.toml may already be at
+# the target version from prior work).
 git add pyproject.toml uv.lock CHANGELOG.md
-git commit -m "chore: release $tag"
+if git diff --cached --quiet; then
+    echo "no version-bump changes to commit; using HEAD as the release commit"
+else
+    git commit -m "chore: release $tag"
+fi
+
 git tag "$tag"
 git push origin main "$tag"
 
