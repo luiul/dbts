@@ -129,11 +129,16 @@ def fetch_history(
     conn: SnowflakeConnection,
     model_names: list[str],
     days: int = DEFAULT_LOOKBACK_DAYS,
+    target_name: str | None = None,
 ) -> list[ModelStats]:
     """Query SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY for stats on the given models.
 
     Uses a `query_tag LIKE` prefilter so Snowflake can prune rows before the
     JSON parse, which is dramatically faster on large account-usage tables.
+
+    When `target_name` is set, also filters on `query_tag:target` so that
+    e.g. `--target sandbox` doesn't get its cost estimates contaminated by
+    runs against live (or vice versa).
     """
     if not model_names:
         return []
@@ -142,6 +147,12 @@ def fetch_history(
     like_clauses = " OR ".join(
         f'query_tag LIKE \'%"model": "{m.replace(chr(39), chr(39) + chr(39))}"%\'' for m in model_names
     )
+
+    target_filter = ""
+    if target_name:
+        safe_target = target_name.replace("'", "''")
+        target_filter = f"\n              AND TRY_PARSE_JSON(query_tag):target::string = '{safe_target}'"
+
     sql = f"""
         WITH candidates AS (
             SELECT *
@@ -162,7 +173,7 @@ def fetch_history(
                 total_elapsed_time / 1000.0                          AS elapsed_s,
                 start_time
             FROM candidates
-            WHERE TRY_PARSE_JSON(query_tag):model::string IN ({quoted})
+            WHERE TRY_PARSE_JSON(query_tag):model::string IN ({quoted}){target_filter}
         )
         SELECT
             model,

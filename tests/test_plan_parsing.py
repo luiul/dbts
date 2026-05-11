@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from dbts._dbt_ls import parse_json_lines as _parse_json_lines
 from dbts.plan import (
     _directory,
     _materialization,
     _model_deps,
-    _parse_json_lines,
     _suggest_excludes,
 )
 

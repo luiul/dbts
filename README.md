@@ -57,16 +57,23 @@ uvx dbts ...
 
 ## Commands
 
-**Sandbox lifecycle** — manage the per-developer clone:
+**Sandbox** — manage the per-developer zero-copy clone:
 
 ```text
-dbts up      --from staging|live           create the clone
-dbts refresh --from staging|live           drop and re-create the clone
+dbts up        --from staging|live         create the clone
+dbts refresh   --from staging|live         drop and re-create the clone
 dbts status                                show clone DB, source, age, owner
 dbts drop                                  drop the clone
-dbts plan    [selectors...]                preview the build set; --cost adds Snowflake estimates
+```
+
+**Inspect** — preview / audit before (or after) a build:
+
+```text
+dbts plan      [selectors...]              preview the build set
   --cost                                     estimate credits + runtime from QUERY_HISTORY
   --days N                                   QUERY_HISTORY lookback window (default 7, max 365)
+dbts freshness [selectors...]              audit lineage; flag stale tables, suggest a rebuild
+  --since                                    explicit threshold (24h, 7d, 1w, or ISO datetime)
 ```
 
 **dbt pass-through** — forwarded to dbt with `--target sandbox` by default:
@@ -114,6 +121,54 @@ By default the command is offline — it parses the dbt project but never connec
 Pass `--cost` to also estimate Snowflake credits and runtime from `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`. With cost on, each per-model row gets `median run` and `last seen` columns (median execution time across recent runs of that model, whatever mode they happened to be in), and the footer adds total credits + USD for an incremental run vs a full refresh, plus a top-5 most expensive list. The default lookback is 7 days; widen with `--days 30` (max 365).
 
 Cost estimates require your dbt project to set a structured `query_tag` containing a `model` field (HelloFresh's `set_query_tag` macro is one example) and the connecting role to read `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`. USD figures use $3.00 per credit by default; override with `$DBTS_CREDIT_RATE`. If access is missing, `dbts plan` prints a hint and falls back to the offline output.
+
+## Auditing freshness after an incident
+
+`dbts freshness` answers "did data flow correctly through this lineage?" by reading `INFORMATION_SCHEMA.TABLES.LAST_ALTERED` for every table in the selected build set, sorting topologically (parents before children), and highlighting stale links in red.
+
+```bash
+# Did the catch-up run reach everything downstream of these models? (defaults to --target live)
+dbts freshness base__recipe__cps+ base__recipe__ingredient__cps+
+
+# Audit the full lineage in both directions
+dbts freshness +base__recipe__cps+
+
+# Compare against an explicit incident timestamp
+dbts freshness base__recipe__cps+ --since '2026-05-09 17:00'
+
+# Audit your sandbox clone instead
+dbts freshness base__recipe__cps+ --target sandbox
+```
+
+**Default target: `live`.** Unlike `dbts build` / `dbts plan` (which default to `sandbox`), `dbts freshness` defaults to `live` because the typical post-incident question is "did production catch up?". Pass `--target sandbox|staging|dev` to audit a different environment. The command translates the target into the actual physical database name (`<DB>_SANDBOX_<USER>`, `<DB>_STAGING`, `<DB>_DEV`, or unsuffixed for `live`), mirroring the project's `generate_database_name` macro convention.
+
+### How "stale" is decided
+
+Two values drive the colored output:
+
+- **Baseline** — the most recent `LAST_ALTERED` across all tables in the build set. It's the "freshest thing you have right now," shown in the header for context.
+- **Threshold** — anything older than this is flagged as stale (red row).
+
+Without `--since`, the threshold is **adaptive**: `baseline − 6 hours`. The threshold drifts with whatever's currently fresh, so you don't have to know what "fresh" means today.
+
+```
+dbts freshness recipe+
+# baseline = 14:02 (freshest table)
+# threshold = 08:02   (anything older is stale)
+```
+
+With `--since`, the threshold is **explicit** and the adaptive window is ignored. Useful when you know exactly when something broke:
+
+```bash
+dbts freshness recipe+ --since '2026-05-09 17:00'   # absolute (ISO datetime or date)
+dbts freshness recipe+ --since 24h                  # relative (s, m, h, d, w)
+```
+
+The footer prints a copy-pasteable `dbts build --select X+` line that covers the minimum set of stale-roots needed to catch the chain back up — building any model that's already fresh upstream is avoided.
+
+### What `LAST_ALTERED` actually means
+
+The signal is Snowflake's `INFORMATION_SCHEMA.TABLES.LAST_ALTERED`, which dbt bumps on every `INSERT`, `MERGE`, `UPDATE`, or `CREATE OR REPLACE` — so "fresh" means "dbt touched it recently," not necessarily "new rows arrived." For the post-incident "did the chain re-execute?" question, that's exactly the right semantic. Requires the connecting role to read `INFORMATION_SCHEMA.TABLES`.
 
 ## Project-side coupling
 

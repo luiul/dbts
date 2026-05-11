@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 import subprocess
 import threading
@@ -15,6 +14,12 @@ from rich.console import Console
 from rich.table import Table
 
 from dbts import cost, dbt_runner
+from dbts._dbt_ls import (
+    DEFAULT_OUTPUT_KEYS,
+    has_flag,
+    parse_json_lines,
+    strip_ls_incompatible,
+)
 from dbts.config import Target
 from dbts.cost import (
     DEFAULT_LOOKBACK_DAYS,
@@ -25,27 +30,6 @@ from dbts.cost import (
     ModelStats,
 )
 from dbts.snowflake import connect
-
-OUTPUT_KEYS = "name resource_type config tags original_file_path depends_on"
-
-# Flags that are valid on `dbt build` / `run` etc. but not on `dbt ls`.
-# `dbts plan` accepts the same surface as `dbts build` for ergonomics, then
-# strips these before invoking `dbt ls` so the user can reuse their build
-# command verbatim.
-LS_INCOMPATIBLE_FLAGS: frozenset[str] = frozenset(
-    {
-        "--full-refresh",
-        "--no-full-refresh",
-        "--fail-fast",
-        "--no-fail-fast",
-        "--store-failures",
-        "--no-store-failures",
-        "--empty",
-        "--sample",
-        "--threads",
-    }
-)
-LS_INCOMPATIBLE_FLAGS_WITH_VALUE: frozenset[str] = frozenset({"--threads"})
 
 log = logging.getLogger("dbts.plan")
 console = Console()
@@ -72,7 +56,7 @@ def run(
     """
     dbt_runner.ensure_dbt_on_path()
 
-    arg_list = _strip_ls_incompatible(list(args))
+    arg_list = strip_ls_incompatible(list(args))
     cmd = [
         "dbt",
         "ls",
@@ -81,17 +65,21 @@ def run(
         "--output",
         "json",
         "--output-keys",
-        OUTPUT_KEYS,
+        DEFAULT_OUTPUT_KEYS,
         *arg_list,
     ]
-    if not _has_flag(arg_list, "--resource-type"):
+    if not has_flag(arg_list, "--resource-type"):
         cmd.extend(["--resource-type", "model"])
 
     # Kick off Snowflake auth in parallel — it's independent of `dbt ls`.
     conn_holder: dict[str, Any] = {}
     conn_thread: threading.Thread | None = None
     if with_cost:
-        log.info("[dim]Fetching cost data from Snowflake (last %d days)...[/dim]", days)
+        log.info(
+            "[dim]Fetching cost data from Snowflake (last %d days, target=%s)...[/dim]",
+            days,
+            target_name,
+        )
         conn_thread = threading.Thread(target=_open_connection, args=(target, conn_holder), daemon=True)
         conn_thread.start()
 
@@ -114,7 +102,7 @@ def run(
             console.print(completed.stdout.rstrip())
         return completed.returncode
 
-    records = _parse_json_lines(completed.stdout)
+    records = parse_json_lines(completed.stdout)
     if not records:
         if conn_thread is not None:
             conn_thread.join()
@@ -125,7 +113,7 @@ def run(
     stats_by_model: dict[str, dict[str, ModelStats]] = {}
     cost_report: CostReport | None = None
     if with_cost and conn_thread is not None:
-        stats_by_model, cost_report = _finish_cost(records, conn_thread, conn_holder, days)
+        stats_by_model, cost_report = _finish_cost(records, conn_thread, conn_holder, days, target_name)
 
     _render(records, stats_by_model, cost_report)
     return 0
@@ -143,41 +131,6 @@ def _close(conn: Any) -> None:
         return
     with contextlib.suppress(Exception):
         conn.close()
-
-
-def _has_flag(args: list[str], flag: str) -> bool:
-    return any(a == flag or a.startswith(f"{flag}=") for a in args)
-
-
-def _strip_ls_incompatible(args: list[str]) -> list[str]:
-    """Drop flags that `dbt ls` doesn't accept (they're build-only)."""
-    out: list[str] = []
-    i = 0
-    while i < len(args):
-        tok = args[i]
-        bare = tok.split("=", 1)[0]
-        if bare in LS_INCOMPATIBLE_FLAGS:
-            if "=" not in tok and bare in LS_INCOMPATIBLE_FLAGS_WITH_VALUE and i + 1 < len(args):
-                i += 2
-                continue
-            i += 1
-            continue
-        out.append(tok)
-        i += 1
-    return out
-
-
-def _parse_json_lines(stdout: str) -> list[dict]:
-    out: list[dict] = []
-    for raw in stdout.splitlines():
-        line = raw.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            out.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return out
 
 
 def _materialization(record: dict) -> str:
@@ -201,6 +154,7 @@ def _finish_cost(
     conn_thread: threading.Thread,
     conn_holder: dict[str, Any],
     days: int,
+    target_name: str,
 ) -> tuple[dict[str, dict[str, ModelStats]], CostReport | None]:
     """Wait for the parallel Snowflake auth, then run QUERY_HISTORY query."""
     model_names = [r["name"] for r in records if r.get("name")]
@@ -221,7 +175,7 @@ def _finish_cost(
     if conn is None:
         return {}, None
     try:
-        stats = cost.fetch_history(conn, model_names, days=days)
+        stats = cost.fetch_history(conn, model_names, days=days, target_name=target_name)
     except Exception as e:  # snowflake.connector raises a zoo of types
         log.warning(
             "[yellow]Cost data unavailable:[/yellow] %s\n[dim]Continuing without cost estimates.[/dim]",

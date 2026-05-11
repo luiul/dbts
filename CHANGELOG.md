@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-12
+
+### Added
+- `dbts freshness <selectors>` — lineage audit. Reads `INFORMATION_SCHEMA.TABLES.LAST_ALTERED` for every table in the selected build set, sorts topologically (parents → children), and highlights stale tables in red. Footer prints a copy-pasteable `dbts build --select X+` line covering the minimum set of stale roots needed to catch the chain back up. Default staleness threshold is 6 hours behind the freshest table in the set; override with `--since 24h` / `--since '2026-05-09 17:00'`. Useful for post-incident audits where you want to verify a catch-up run reached everything downstream without paying for a redundant `--full-refresh`.
+
+### Changed
+- Regrouped `dbts --help` panels: `plan` and `freshness` moved out of "Sandbox lifecycle" into a new "Inspect" panel (they don't manage the sandbox; they look at it / at the warehouse). "Sandbox lifecycle" is now just "Sandbox" (covers up/refresh/drop/status only).
+- Trimmed redundancy in `dbts --help`: pass-through subcommand descriptions are now one-liners; the "bare positional selectors" hint is mentioned once in the root help instead of repeated per command. Root `APP_HELP` is shorter — examples moved to the README.
+- `dbts freshness` now defaults to `--target live` (was `sandbox`). Post-incident audits target production by default; pass `--target sandbox|staging|dev` to audit another environment.
+- `dbts freshness` now applies the project's database-name convention (appends `_SANDBOX_<USER>` / `_STAGING` / `_DEV` based on `--target`) so the audit hits the actual physical database for the chosen environment instead of whatever static `database:` is in `dbt_project.yml`. Previously the audit silently read the live database regardless of `--target`.
+- `dbts plan --cost` now filters `QUERY_HISTORY` by `query_tag:target` so cost estimates reflect only runs against the chosen `--target`. Previously a `--target sandbox --cost` call could return live's cost data, contaminating the estimate.
+- Extracted `_dbt_ls.py` helper module so commands wrapping `dbt ls` (currently `plan`, now `freshness` too) share `parse_json_lines`, `strip_ls_incompatible`, `has_flag`, and `DEFAULT_OUTPUT_KEYS` instead of each carrying its own copy. No behavior change for `dbts plan`.
+
 ## [0.5.0] — 2026-05-11
 
 ### Added

@@ -6,7 +6,7 @@ from enum import StrEnum
 import typer
 from rich.console import Console
 
-from dbts import clone, dbt_runner, log, plan
+from dbts import clone, dbt_runner, freshness, log, plan
 from dbts.config import (
     ConfigError,
     default_profile_name,
@@ -15,7 +15,8 @@ from dbts.config import (
 
 HELP_OPTION_NAMES = ["-h", "--help"]
 
-PANEL_LIFECYCLE = "Sandbox lifecycle"
+PANEL_SANDBOX = "Sandbox"
+PANEL_INSPECT = "Inspect"
 PANEL_DBT = "dbt pass-through"
 PANEL_META = "Meta"
 
@@ -23,17 +24,8 @@ APP_HELP = """\
 dbt environment runner with Snowflake zero-copy clone sandboxes.
 
 `dbts` manages a per-developer zero-copy clone of staging or live, then runs dbt
-against it. Lifecycle commands (up/refresh/drop/status) manage the sandbox; all
-other commands pass through to dbt with `--target sandbox` by default.
-
-Examples:
-  dbts up --from staging              # create the sandbox clone
-  dbts plan my_model+ --target live   # preview the build set without running it
-  dbts build my_model+                # dbt build against sandbox (selectors work bare)
-  dbts test +my_model+ --target live  # dbt test against the live target
-  dbts status                         # show the sandbox's source, age, owner
-  dbts refresh --from staging         # drop and re-clone
-  dbts drop                           # drop the sandbox
+against it. dbt pass-through commands accept bare positional model selectors
+(e.g. `dbts build my_model+`) and default to `--target sandbox`.
 
 Profile resolution: $DBTS_PROFILE first, then `profile:` in dbt_project.yml.
 """
@@ -74,7 +66,7 @@ class TargetEnum(StrEnum):
 # --------------------------------------------------------------------------- #
 
 
-@app.command("up", rich_help_panel=PANEL_LIFECYCLE)
+@app.command("up", rich_help_panel=PANEL_SANDBOX)
 def cmd_up(
     from_: SourceEnum = typer.Option(..., "--from", help="Database to clone from."),
 ) -> None:
@@ -82,7 +74,7 @@ def cmd_up(
     _run_or_exit(lambda: clone.up(from_.value))
 
 
-@app.command("refresh", rich_help_panel=PANEL_LIFECYCLE)
+@app.command("refresh", rich_help_panel=PANEL_SANDBOX)
 def cmd_refresh(
     from_: SourceEnum = typer.Option(..., "--from", help="Database to re-clone from."),
 ) -> None:
@@ -90,13 +82,13 @@ def cmd_refresh(
     _run_or_exit(lambda: clone.refresh(from_.value))
 
 
-@app.command("drop", rich_help_panel=PANEL_LIFECYCLE)
+@app.command("drop", rich_help_panel=PANEL_SANDBOX)
 def cmd_drop() -> None:
     """Drop the sandbox database."""
     _run_or_exit(clone.drop)
 
 
-@app.command("status", rich_help_panel=PANEL_LIFECYCLE)
+@app.command("status", rich_help_panel=PANEL_SANDBOX)
 def cmd_status() -> None:
     """Show the sandbox's source, age, and owner."""
     _run_or_exit(clone.status)
@@ -226,13 +218,7 @@ def _make_dbt_passthrough(subcommand: str):
         raise typer.Exit(code=rc)
 
     _cmd.__name__ = f"dbt_{subcommand}"
-    if subcommand in DBT_SELECTOR_SUBCOMMANDS:
-        _cmd.__doc__ = (
-            f"Pass-through to `dbt {subcommand}`. Bare positional args are forwarded "
-            "as `--select <args>` (e.g. `dbts build my_model+`)."
-        )
-    else:
-        _cmd.__doc__ = f"Pass-through to `dbt {subcommand}`."
+    _cmd.__doc__ = f"Pass-through to `dbt {subcommand}`."
     return _cmd
 
 
@@ -243,7 +229,7 @@ for _sub in DBT_SUBCOMMANDS:
 @app.command(
     "plan",
     context_settings=DBT_CONTEXT_SETTINGS,
-    rich_help_panel=PANEL_LIFECYCLE,
+    rich_help_panel=PANEL_INSPECT,
 )
 def cmd_plan(
     ctx: typer.Context,
@@ -271,6 +257,40 @@ def cmd_plan(
         target_cfg = read_profile(default_profile_name(), target.value)
         forwarded = _promote_selectors("ls", list(ctx.args))
         rc = plan.run(forwarded, target.value, target_cfg, with_cost=cost, days=days)
+    except ConfigError as e:
+        _print_config_error(e)
+        raise typer.Exit(code=1) from e
+    raise typer.Exit(code=rc)
+
+
+@app.command(
+    "freshness",
+    context_settings=DBT_CONTEXT_SETTINGS,
+    rich_help_panel=PANEL_INSPECT,
+)
+def cmd_freshness(
+    ctx: typer.Context,
+    target: TargetEnum = typer.Option(
+        TargetEnum.live,
+        "--target",
+        "-t",
+        help=("dbt target to audit. Defaults to live since post-incident freshness checks usually target production."),
+    ),
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help=(
+            "Stale threshold. Accepts ISO datetime (`2026-05-09T17:00:00Z`), "
+            "ISO date (`2026-05-09`), or relative (`24h`, `7d`, `1w`). "
+            "Default: 6 hours before the freshest table in the set."
+        ),
+    ),
+) -> None:
+    """Audit lineage freshness — flag tables not touched recently."""
+    try:
+        target_cfg = read_profile(default_profile_name(), target.value)
+        forwarded = _promote_selectors("ls", list(ctx.args))
+        rc = freshness.run(forwarded, target.value, target_cfg, since=since)
     except ConfigError as e:
         _print_config_error(e)
         raise typer.Exit(code=1) from e
