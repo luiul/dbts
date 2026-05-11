@@ -24,10 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `_promote_selectors` no longer silently turns trailing positionals into `--select` when the user typed `--exclude foo bar`. Bare positionals now attach to the most recent selector flag (`--select` / `-s` / `--exclude`), matching the user's likely intent. Regression tests added.
+
+### Repo polish
 - `.github/dependabot.yml` — weekly auto-PRs for GitHub Actions and Python dependencies (grouped per ecosystem).
 - `.editorconfig` — consistent indent/whitespace/encoding across editors.
-
-### Changed
 - CI now runs `uv lock --check` before sync, so a stale `uv.lock` fails fast.
 - `pyproject.toml` adds `Changelog` and `Releases` URLs to the PyPI sidebar.
 
