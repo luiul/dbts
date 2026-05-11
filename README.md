@@ -108,3 +108,21 @@ The output groups models by directory, shows materialization and tags per model,
 2. The `profile:` field in `dbt_project.yml` at the project root.
 
 Jinja `{{ env_var('NAME', 'default') }}` calls in the `profile:` field are rendered against the current environment, so projects whose profile name is templated (e.g. `tardis_{{ env_var('warehouse', 'snowflake') }}`) work out of the box.
+
+## Development
+
+```bash
+uv sync --group dev
+uv run pytest
+prek install   # one-time, runs ruff + ty on every commit
+```
+
+`prek` (Astral's Rust port of `pre-commit`) is the recommended runner for the hooks defined in `.pre-commit-config.yaml`. Install it via `brew install prek` or `uv tool install prek`. The standard `pre-commit` binary works just as well if you'd rather use it.
+
+Cutting a release (after moving `[Unreleased]` entries under a `[X.Y.Z]` heading in `CHANGELOG.md`):
+
+```bash
+./scripts/release.sh 0.4.0
+```
+
+The script bumps `pyproject.toml`, syncs the lockfile, runs the full check suite, commits, tags, pushes, and creates the GitHub release with notes pulled from `CHANGELOG.md`.

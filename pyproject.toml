@@ -1,6 +1,6 @@
 [project]
 name = "dbts"
-version = "0.3.0"
+version = "0.4.0"
 description = "dbt environment runner with Snowflake zero-copy clone sandboxes"
 readme = "README.md"
 license = "MIT"
@@ -40,7 +40,7 @@ build-backend = "hatchling.build"
 packages = ["src/dbts"]
 
 [dependency-groups]
-dev = ["ruff>=0.6", "ty"]
+dev = ["ruff>=0.6", "ty", "pytest>=8"]
 
 [tool.ruff]
 line-length = 120
@@ -52,3 +52,7 @@ ignore = ["E501", "B008"]
 
 [tool.ty.src]
 include = ["src/dbts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-q", "--strict-markers"]
