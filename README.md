@@ -19,10 +19,10 @@ uvx dbts ...
 
 ## Quick start
 
-1. Add a `sandbox:` target to `~/.dbt/profiles.yml` (alongside your existing `dev`, `staging`, `live`):
+1. Add a `sandbox:` target to `~/.dbt/profiles.yml` (alongside your existing `dev`, `staging`, `live`). The database name must match the pattern `<PREFIX>_SANDBOX_<USER>`:
 
    ```yaml
-   tardis_snowflake:
+   <your_profile_name>:           # whatever your dbt_project.yml's profile: field says
      outputs:
        sandbox:
          type: snowflake
@@ -30,9 +30,9 @@ uvx dbts ...
          user: <same as the other targets>
          role: <same as the other targets>
          authenticator: externalbrowser
-         database: scm_analytics_sandbox_<your_username>
+         database: <prefix>_sandbox_<your_username>
          warehouse: <same as the other targets>
-         schema: raw_data_vault
+         schema: <same as the other targets>
    ```
 
 2. Create your clone:
@@ -57,19 +57,33 @@ uvx dbts ...
 
 ## Commands
 
+**Sandbox lifecycle** — manage the per-developer clone:
+
 ```text
-dbts up      --from staging|live   create the clone
-dbts refresh --from staging|live   drop and re-create the clone
-dbts status                        show clone DB, source, age
-dbts drop                          drop the clone
-
-dbts build|run|test|compile|...    pass through to dbt (default --target sandbox)
-  --target sandbox|staging|live|dev   choose target
-
-dbts version                       print installed version
+dbts up      --from staging|live           create the clone
+dbts refresh --from staging|live           drop and re-create the clone
+dbts status                                show clone DB, source, age, owner
+dbts drop                                  drop the clone
+dbts plan    [selectors...]                preview the build set; --cost adds Snowflake estimates
+  --cost                                     estimate credits + runtime from QUERY_HISTORY
+  --days N                                   QUERY_HISTORY lookback window (default 7, max 365)
 ```
 
-Global flags: `-v / --verbose` (debug logging, including DDL), `-q / --quiet` (warnings only). `-h` is a shorthand for `--help`.
+**dbt pass-through** — forwarded to dbt with `--target sandbox` by default:
+
+```text
+dbts run|build|test|compile|seed|snapshot|ls|show
+dbts debug|deps|source|docs|parse|clean
+  --target sandbox|staging|live|dev          choose target (-t)
+```
+
+**Meta:**
+
+```text
+dbts version                               print installed version
+```
+
+Global flags: `-v / --verbose` (debug logging, including DDL), `-q / --quiet` (warnings only). `-h` is a shorthand for `--help` on every command. Run `dbts <command> --help` for the full option list.
 
 ## Selectors
 
@@ -127,7 +141,7 @@ prek install   # one-time, runs ruff + ty on every commit
 Cutting a release (after moving `[Unreleased]` entries under a `[X.Y.Z]` heading in `CHANGELOG.md`):
 
 ```bash
-./scripts/release.sh 0.4.0
+./scripts/release.sh 0.6.0
 ```
 
-The script bumps `pyproject.toml`, syncs the lockfile, runs the full check suite, commits, tags, pushes, and creates the GitHub release with notes pulled from `CHANGELOG.md`.
+The script bumps `pyproject.toml`, syncs the lockfile, runs the full check suite, commits, tags, pushes, and creates the GitHub release with notes pulled from `CHANGELOG.md`. See [`scripts/README.md`](scripts/README.md) for both supported workflows and recovery tips.
