@@ -276,7 +276,7 @@ def _render(
             table.add_column("tags", overflow="fold")
         table.add_column("parents", justify="right")
         if show_per_model_cost:
-            table.add_column("p50 incr", justify="right")
+            table.add_column("median run", justify="right")
             table.add_column("last seen", justify="right")
         for r in models:
             name = r.get("name") or "?"
