@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] — 2026-05-11
 
 ### Added
-- `dbts plan` can now estimate Snowflake credits and elapsed time for an incremental run vs. a full refresh of the build set, based on the last 30 days of `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY` filtered by the `query_tag:model` field. Models with no full-refresh history are extrapolated from incremental p50 × 8.
+- `dbts plan` can now estimate Snowflake credits and elapsed time for an incremental run vs. a full refresh of the build set, based on `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY` filtered by the `query_tag:model` field. Models with no full-refresh history are extrapolated from incremental p50 × 8.
 - `--cost` flag on `dbts plan`: off by default (offline, no Snowflake call). When passed, the per-model table gets `median run` and `last seen` columns, and the footer adds total credits/USD for incremental vs. full refresh plus a top-5 most expensive list.
 - `--days N` flag on `dbts plan` (default 7) controls the QUERY_HISTORY lookback window. 7 days covers a typical week of dev iteration and is roughly 4x faster than the prior 30-day query; pass `--days 30` (or up to 365) when investigating long-term trends.
 - Per-directory tables now render with column headers (`model | materialization | tags | parents`, plus `median run | last seen` when `--cost` is on) so the columns are self-documenting.
