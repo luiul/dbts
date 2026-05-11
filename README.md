@@ -85,6 +85,17 @@ dbts build --select a b           # `--select` + bare positional are merged
 
 Internally, bare positional args on `run / build / test / compile / seed / snapshot / ls / show` are promoted to a `--select` value before being forwarded to dbt. Other subcommands (`debug`, `deps`, `docs`, `parse`, `clean`, `source`) pass arguments through verbatim.
 
+## Previewing a build
+
+`dbts plan` lists exactly which models a `dbts build` (or `run`/`test`/...) with the same selectors would touch — without connecting to Snowflake or running anything. Useful when a build against `--target live` blows up halfway and you need to add `--exclude` rules.
+
+```bash
+dbts plan my_model+ another_model+ --target live
+dbts plan --select tag:slow --exclude path:models/intermediate
+```
+
+The output groups models by directory, shows materialization and tags per model, and prints a footer of suggested `--exclude path:<dir>` and `--exclude tag:<name>` snippets so you can copy-paste them straight into the corresponding `dbts build` invocation.
+
 ## Project-side coupling
 
 `dbts` assumes the dbt project's `generate_database_name` macro recognises `ENV=sandbox` and routes models into a `_SANDBOX_<USER>` suffixed database. See the dbt project's README for the macro snippet.

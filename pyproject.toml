@@ -1,6 +1,6 @@
 [project]
 name = "dbts"
-version = "0.2.0"
+version = "0.3.0"
 description = "dbt environment runner with Snowflake zero-copy clone sandboxes"
 readme = "README.md"
 license = "MIT"

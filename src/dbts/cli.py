@@ -6,7 +6,7 @@ from enum import StrEnum
 import typer
 from rich.console import Console
 
-from dbts import clone, dbt_runner, log
+from dbts import clone, dbt_runner, log, plan
 from dbts.config import (
     ConfigError,
     default_profile_name,
@@ -28,6 +28,7 @@ other commands pass through to dbt with `--target sandbox` by default.
 
 Examples:
   dbts up --from staging              # create the sandbox clone
+  dbts plan my_model+ --target live   # preview the build set without running it
   dbts build my_model+                # dbt build against sandbox (selectors work bare)
   dbts test +my_model+ --target live  # dbt test against the live target
   dbts status                         # show the sandbox's source, age, owner
@@ -227,6 +228,31 @@ def _make_dbt_passthrough(subcommand: str):
 
 for _sub in DBT_SUBCOMMANDS:
     app.command(_sub, context_settings=DBT_CONTEXT_SETTINGS, rich_help_panel=PANEL_DBT)(_make_dbt_passthrough(_sub))
+
+
+@app.command(
+    "plan",
+    context_settings=DBT_CONTEXT_SETTINGS,
+    rich_help_panel=PANEL_LIFECYCLE,
+)
+def cmd_plan(
+    ctx: typer.Context,
+    target: TargetEnum = typer.Option(
+        TargetEnum.sandbox,
+        "--target",
+        "-t",
+        help="dbt target whose env/profile is used to parse the project. Default: sandbox.",
+    ),
+) -> None:
+    """Preview the build set for given selectors. Offline; no Snowflake connection."""
+    try:
+        target_cfg = read_profile(default_profile_name(), target.value)
+        forwarded = _promote_selectors("ls", list(ctx.args))
+        rc = plan.run(forwarded, target.value, target_cfg)
+    except ConfigError as e:
+        _print_config_error(e)
+        raise typer.Exit(code=1) from e
+    raise typer.Exit(code=rc)
 
 
 # --------------------------------------------------------------------------- #
