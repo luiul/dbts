@@ -28,6 +28,8 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/luiul/dbts"
 Issues = "https://github.com/luiul/dbts/issues"
+Changelog = "https://github.com/luiul/dbts/blob/main/CHANGELOG.md"
+Releases = "https://github.com/luiul/dbts/releases"
 
 [project.scripts]
 dbts = "dbts.cli:app"

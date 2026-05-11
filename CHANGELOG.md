@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `.github/dependabot.yml` — weekly auto-PRs for GitHub Actions and Python dependencies (grouped per ecosystem).
+- `.editorconfig` — consistent indent/whitespace/encoding across editors.
+
+### Changed
+- CI now runs `uv lock --check` before sync, so a stale `uv.lock` fails fast.
+- `pyproject.toml` adds `Changelog` and `Releases` URLs to the PyPI sidebar.
+
 ## [0.4.0] — 2026-05-11
 
 ### Added
