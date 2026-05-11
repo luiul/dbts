@@ -87,14 +87,19 @@ Internally, bare positional args on `run / build / test / compile / seed / snaps
 
 ## Previewing a build
 
-`dbts plan` lists exactly which models a `dbts build` (or `run`/`test`/...) with the same selectors would touch — without connecting to Snowflake or running anything. Useful when a build against `--target live` blows up halfway and you need to add `--exclude` rules.
+`dbts plan` lists exactly which models a `dbts build` (or `run`/`test`/...) with the same selectors would touch. Useful when a build against `--target live` blows up halfway and you need to add `--exclude` rules.
 
 ```bash
-dbts plan my_model+ another_model+ --target live
+dbts plan my_model+ another_model+ --target live           # offline, fast
 dbts plan --select tag:slow --exclude path:models/intermediate
+dbts plan my_model+ --target live --cost                   # + Snowflake cost breakdown
 ```
 
-The output groups models by directory, shows materialization and tags per model, and prints a footer of suggested `--exclude path:<dir>` and `--exclude tag:<name>` snippets so you can copy-paste them straight into the corresponding `dbts build` invocation.
+By default the command is offline — it parses the dbt project but never connects to Snowflake. Output groups models by directory and shows materialization, tags, and parent count per model. The footer prints suggested `--exclude path:<dir>` and `--exclude tag:<name>` snippets sized by how many models each would prune.
+
+Pass `--cost` to also estimate Snowflake credits and runtime from `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`. With cost on, each per-model row gets `p50 incr` and `last seen` columns, and the footer adds total credits + USD for an incremental run vs a full refresh, plus a top-5 most expensive list. The default lookback is 7 days; widen with `--days 30` (max 365).
+
+Cost estimates require your dbt project to set a structured `query_tag` containing a `model` field (HelloFresh's `set_query_tag` macro is one example) and the connecting role to read `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`. USD figures use $3.00 per credit by default; override with `$DBTS_CREDIT_RATE`. If access is missing, `dbts plan` prints a hint and falls back to the offline output.
 
 ## Project-side coupling
 

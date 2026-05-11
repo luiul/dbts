@@ -154,37 +154,47 @@ _DBT_FLAGS_WITH_VALUE: frozenset[str] = frozenset(
 )
 
 
-def _promote_selectors(subcommand: str, args: list[str]) -> list[str]:
-    """Wrap bare positional args in `--select` for selector-aware dbt subcommands.
+_SELECTOR_FLAGS: frozenset[str] = frozenset({"--select", "-s", "--exclude"})
 
-    dbt expects `--select`/`-s` for graph selectors; passing them bare yields
-    "Got unexpected extra argument". This pulls bare positionals out and
-    appends them as an additional `--select <args>`. dbt unions multiple
-    `--select` flags, so combining them with an explicit `--select`/`-s` works
-    naturally.
+
+def _promote_selectors(subcommand: str, args: list[str]) -> list[str]:
+    """Attach bare positional args to the most recent selector flag.
+
+    dbt rejects bare positional model names; they must be passed via
+    `--select`/`-s`/`--exclude`. We walk the args left-to-right and attribute
+    each bare positional to whichever selector flag last appeared (defaulting
+    to `--select` if none has). This makes invocations like
+    ``dbts build foo --exclude bar baz`` do what the user almost always means:
+    ``--select foo --exclude bar --exclude baz`` — instead of silently
+    promoting ``baz`` back to ``--select``.
+
+    dbt accepts repeated `--select` / `--exclude` flags and unions their
+    values, so the chained-flag output is semantically equivalent to a single
+    space-separated value but easier to reason about.
     """
     if subcommand not in DBT_SELECTOR_SUBCOMMANDS:
         return args
 
-    positionals: list[str] = []
-    rest: list[str] = []
+    out: list[str] = []
+    current_mode = "--select"
     i = 0
     while i < len(args):
         tok = args[i]
         if tok.startswith("-"):
-            rest.append(tok)
             if "=" not in tok and tok in _DBT_FLAGS_WITH_VALUE and i + 1 < len(args):
-                rest.append(args[i + 1])
+                out.append(tok)
+                out.append(args[i + 1])
+                if tok in _SELECTOR_FLAGS:
+                    current_mode = tok
                 i += 2
                 continue
+            out.append(tok)
             i += 1
             continue
-        positionals.append(tok)
+        out.append(current_mode)
+        out.append(tok)
         i += 1
-
-    if not positionals:
-        return args
-    return [*rest, "--select", " ".join(positionals)]
+    return out
 
 
 DBT_CONTEXT_SETTINGS: dict[str, object] = {
@@ -243,12 +253,24 @@ def cmd_plan(
         "-t",
         help="dbt target whose env/profile is used to parse the project. Default: sandbox.",
     ),
+    cost: bool = typer.Option(
+        False,
+        "--cost",
+        help="Estimate Snowflake credits + runtime from QUERY_HISTORY. Off by default (offline).",
+    ),
+    days: int = typer.Option(
+        7,
+        "--days",
+        min=1,
+        max=365,
+        help="Lookback window for QUERY_HISTORY when --cost is on. Default: 7.",
+    ),
 ) -> None:
-    """Preview the build set for given selectors. Offline; no Snowflake connection."""
+    """Preview the build set for given selectors. Optionally estimate Snowflake cost."""
     try:
         target_cfg = read_profile(default_profile_name(), target.value)
         forwarded = _promote_selectors("ls", list(ctx.args))
-        rc = plan.run(forwarded, target.value, target_cfg)
+        rc = plan.run(forwarded, target.value, target_cfg, with_cost=cost, days=days)
     except ConfigError as e:
         _print_config_error(e)
         raise typer.Exit(code=1) from e
