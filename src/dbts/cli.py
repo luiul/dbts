@@ -317,7 +317,7 @@ def _hint_for(msg: str) -> str | None:
     if "could not find dbt_project.yml" in lowered:
         return "run dbts from inside a dbt project directory."
     if "sandbox database" in lowered and "does not exist" in lowered:
-        return "create it with `dbts up --from staging` or `--from live`."
+        return "run `dbts up --from staging` (dev work) or `--from live` (prod data). Zero-copy, instant."
     if "does not match the expected pattern" in lowered:
         return "the sandbox target's `database:` must look like <PREFIX>_SANDBOX_<USER>."
     if "profile '" in lowered and "not found in" in lowered:
