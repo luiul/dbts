@@ -7,7 +7,7 @@
 
 dbt environment runner with Snowflake zero-copy clone sandboxes.
 
-`dbts` lets you run dbt against a private, per-developer Snowflake clone of your staging or live database — without managing a separate set of credentials, profile files, or CLIs. It also acts as a single front for running dbt against your shared `dev`, `staging`, and `live` targets.
+Run dbt against a private, per-developer Snowflake clone of staging or live without managing a separate profile or CLI — and use the same tool as a single front for your shared `dev`, `staging`, and `live` targets.
 
 ## Install
 
@@ -104,7 +104,7 @@ dbts build my_model+ --exclude experiments
 dbts build --select a b           # `--select` + bare positional are merged
 ```
 
-Internally, bare positional args on `run / build / test / compile / seed / snapshot / ls / show` are promoted to a `--select` value before being forwarded to dbt. Other subcommands (`debug`, `deps`, `docs`, `parse`, `clean`, `source`) pass arguments through verbatim.
+Bare positional args on `run / build / test / compile / seed / snapshot / ls / show` are promoted to `--select` before being forwarded. Other subcommands (`debug`, `deps`, `docs`, `parse`, `clean`, `source`) pass arguments through verbatim.
 
 ## Previewing a build
 
@@ -116,11 +116,11 @@ dbts plan --select tag:slow --exclude path:models/intermediate
 dbts plan my_model+ --target live --cost                   # + Snowflake cost breakdown
 ```
 
-By default the command is offline — it parses the dbt project but never connects to Snowflake. Output groups models by directory and shows materialization, tags, and parent count per model. The footer prints suggested `--exclude path:<dir>` and `--exclude tag:<name>` snippets sized by how many models each would prune.
+By default the command is offline — it parses the dbt project but never connects to Snowflake. Output groups models by directory and shows materialization, tags, and parent count. The footer prints suggested `--exclude path:<dir>` and `--exclude tag:<name>` snippets sized by how many models each would prune.
 
-Pass `--cost` to also estimate Snowflake credits and runtime from `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`. With cost on, each per-model row gets `median run` and `last seen` columns (median execution time across recent runs of that model, whatever mode they happened to be in), and the footer adds total credits + USD for an incremental run vs a full refresh, plus a top-5 most expensive list. The default lookback is 7 days; widen with `--days 30` (max 365).
+Pass `--cost` to also estimate Snowflake credits and runtime from `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`. Each row gets `median run` and `last seen` columns; the footer adds total credits + USD for an incremental vs full refresh, plus a top-5 most expensive list. Default lookback is 7 days (`--days N`, max 365).
 
-Cost estimates require your dbt project to set a structured `query_tag` containing a `model` field (HelloFresh's `set_query_tag` macro is one example) and the connecting role to read `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`. USD figures use $3.00 per credit by default; override with `$DBTS_CREDIT_RATE`. If access is missing, `dbts plan` prints a hint and falls back to the offline output.
+Cost estimates require a structured `query_tag` with a `model` field (HelloFresh's `set_query_tag` macro is one example) and read access to `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`. USD uses $3.00/credit by default; override with `$DBTS_CREDIT_RATE`. If access is missing, `dbts plan` falls back to the offline output.
 
 ## Auditing freshness after an incident
 
@@ -140,7 +140,7 @@ dbts freshness base__recipe__cps+ --since '2026-05-09 17:00'
 dbts freshness base__recipe__cps+ --target sandbox
 ```
 
-**Default target: `live`.** Unlike `dbts build` / `dbts plan` (which default to `sandbox`), `dbts freshness` defaults to `live` because the typical post-incident question is "did production catch up?". Pass `--target sandbox|staging|dev` to audit a different environment. The command translates the target into the actual physical database name (`<DB>_SANDBOX_<USER>`, `<DB>_STAGING`, `<DB>_DEV`, or unsuffixed for `live`), mirroring the project's `generate_database_name` macro convention.
+**Default target: `live`** (unlike `build` / `plan`, which default to `sandbox`) — the typical post-incident question is "did production catch up?". Pass `--target sandbox|staging|dev` to audit elsewhere. The command resolves the target to the physical database name (`<DB>_SANDBOX_<USER>`, `<DB>_STAGING`, `<DB>_DEV`, or unsuffixed for `live`), mirroring the project's `generate_database_name` macro.
 
 ### How "stale" is decided
 
@@ -168,7 +168,7 @@ The footer prints a copy-pasteable `dbts build --select X+` line that covers the
 
 ### What `LAST_ALTERED` actually means
 
-The signal is Snowflake's `INFORMATION_SCHEMA.TABLES.LAST_ALTERED`, which dbt bumps on every `INSERT`, `MERGE`, `UPDATE`, or `CREATE OR REPLACE` — so "fresh" means "dbt touched it recently," not necessarily "new rows arrived." For the post-incident "did the chain re-execute?" question, that's exactly the right semantic. Requires the connecting role to read `INFORMATION_SCHEMA.TABLES`.
+The signal is Snowflake's `INFORMATION_SCHEMA.TABLES.LAST_ALTERED`, which dbt bumps on every `INSERT`, `MERGE`, `UPDATE`, or `CREATE OR REPLACE`. "Fresh" means "dbt touched it recently," not "new rows arrived" — exactly the right semantic for the "did the chain re-execute?" question. Requires read access to `INFORMATION_SCHEMA.TABLES`.
 
 ## Project-side coupling
 
@@ -191,7 +191,7 @@ uv run pytest
 prek install   # one-time, runs ruff + ty on every commit
 ```
 
-`prek` (Astral's Rust port of `pre-commit`) is the recommended runner for the hooks defined in `.pre-commit-config.yaml`. Install it via `brew install prek` or `uv tool install prek`. The standard `pre-commit` binary works just as well if you'd rather use it.
+`prek` (Astral's Rust port of `pre-commit`) runs the hooks in `.pre-commit-config.yaml`. Install via `brew install prek` or `uv tool install prek`; the standard `pre-commit` binary also works.
 
 Cutting a release (after moving `[Unreleased]` entries under a `[X.Y.Z]` heading in `CHANGELOG.md`):
 
@@ -199,4 +199,4 @@ Cutting a release (after moving `[Unreleased]` entries under a `[X.Y.Z]` heading
 ./scripts/release.sh 0.6.0
 ```
 
-The script bumps `pyproject.toml`, syncs the lockfile, runs the full check suite, commits, tags, pushes, and creates the GitHub release with notes pulled from `CHANGELOG.md`. See [`scripts/README.md`](scripts/README.md) for both supported workflows and recovery tips.
+The script bumps `pyproject.toml`, syncs the lockfile, runs checks, commits, tags, pushes, and creates the GitHub release from `CHANGELOG.md`. See [`scripts/README.md`](scripts/README.md) for the full workflow and recovery tips.
