@@ -64,6 +64,8 @@ dbts up        --from staging|live         create the clone
 dbts refresh   --from staging|live         drop and re-create the clone
 dbts status                                show clone DB, source, age, owner
 dbts drop                                  drop the clone
+dbts publish                               grant ROLE PUBLIC read access (incl. future objects)
+dbts unpublish                             revoke ROLE PUBLIC's access
 ```
 
 **Inspect** — preview / audit before (or after) a build:

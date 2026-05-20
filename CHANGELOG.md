@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `dbts publish` / `dbts unpublish` — grant or revoke read access to the sandbox for Snowflake's `PUBLIC` role. Issues `GRANT USAGE` on the database and all/future schemas plus `GRANT SELECT` on all/future tables and views (so subsequent `dbts build` runs stay shared without re-publishing). Both commands prompt for confirmation by default; pass `--yes` / `-y` to skip. Sandbox-scoped — refuses to run unless the active profile's database matches `<PREFIX>_SANDBOX_<USER>`. Use after a sandbox build is QA-ready, when reviewers need to read the tables without waiting for promotion to staging or live.
+
 ## [0.6.0] — 2026-05-12
 
 ### Added

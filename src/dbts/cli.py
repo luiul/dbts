@@ -6,7 +6,7 @@ from enum import StrEnum
 import typer
 from rich.console import Console
 
-from dbts import clone, dbt_runner, freshness, log, plan
+from dbts import clone, dbt_runner, freshness, log, plan, publish
 from dbts.config import (
     ConfigError,
     default_profile_name,
@@ -92,6 +92,22 @@ def cmd_drop() -> None:
 def cmd_status() -> None:
     """Show the sandbox's source, age, and owner."""
     _run_or_exit(clone.status)
+
+
+@app.command("publish", rich_help_panel=PANEL_SANDBOX)
+def cmd_publish(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
+    """Grant ROLE PUBLIC read access to the sandbox (incl. future objects)."""
+    _run_or_exit(lambda: publish.publish(yes=yes))
+
+
+@app.command("unpublish", rich_help_panel=PANEL_SANDBOX)
+def cmd_unpublish(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
+    """Revoke ROLE PUBLIC's read access to the sandbox."""
+    _run_or_exit(lambda: publish.unpublish(yes=yes))
 
 
 # --------------------------------------------------------------------------- #
