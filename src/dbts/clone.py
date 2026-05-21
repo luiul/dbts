@@ -16,7 +16,7 @@ from dbts.config import (
     read_profile,
     sandbox_user,
 )
-from dbts.snowflake import connect, run_sql
+from dbts.snowflake import connect, log_target_info, run_sql
 
 Source = Literal["staging", "live"]
 SOURCES: tuple[Source, ...] = ("staging", "live")
@@ -64,43 +64,49 @@ def up(source: Source) -> int:
     target_db = sandbox.database.upper()
     source_db = src.database.upper()
 
-    conn = connect(sandbox)
-    try:
-        existing = _show_database(conn, target_db)
-        if existing:
-            comment = (existing.get("comment") or "").strip()
-            match = COMMENT_PATTERN.match(comment)
-            if match and match.group("source") == source:
-                log.info(
-                    "[green]Sandbox already exists[/green]: %s (cloned from %s at %s)",
-                    target_db,
+    log_target_info(sandbox)
+    with console.status("[dim]Authenticating to Snowflake…[/dim]") as status:
+        conn = connect(sandbox)
+        try:
+            status.update(f"[dim]Checking sandbox state ({target_db})…[/dim]")
+            existing = _show_database(conn, target_db)
+            if existing:
+                comment = (existing.get("comment") or "").strip()
+                match = COMMENT_PATTERN.match(comment)
+                status.stop()
+                if match and match.group("source") == source:
+                    log.info(
+                        "[green]Sandbox already exists[/green]: %s (cloned from %s at %s)",
+                        target_db,
+                        source,
+                        match.group("ts"),
+                    )
+                    return 0
+                current_source = match.group("source") if match else "?"
+                log.error(
+                    "[red]Sandbox exists but was cloned from '%s', not '%s'.[/red] "
+                    "Run [bold]dbts refresh --from %s[/bold] to re-clone.",
+                    current_source,
                     source,
-                    match.group("ts"),
+                    source,
                 )
-                return 0
-            current_source = match.group("source") if match else "?"
-            log.error(
-                "[red]Sandbox exists but was cloned from '%s', not '%s'.[/red] "
-                "Run [bold]dbts refresh --from %s[/bold] to re-clone.",
-                current_source,
-                source,
-                source,
-            )
-            return 1
+                return 1
 
-        comment = f"dbts: cloned from {source} at {_now_iso()} by {getpass.getuser()}"
-        ddl = f"CREATE DATABASE {_sql_ident(target_db)} CLONE {_sql_ident(source_db)} COMMENT = '{_sql_quote(comment)}'"
-        log.debug("[dim]%s[/dim]", ddl)
-        run_sql(conn, ddl)
-        log.info(
-            "[green]Created sandbox[/green] %s (zero-copy clone of %s, user=%s)",
-            target_db,
-            source_db,
-            user,
-        )
-        return 0
-    finally:
-        conn.close()
+            status.update(f"[dim]Cloning {source_db} → {target_db}…[/dim]")
+            comment = f"dbts: cloned from {source} at {_now_iso()} by {getpass.getuser()}"
+            ddl = f"CREATE DATABASE {_sql_ident(target_db)} CLONE {_sql_ident(source_db)} COMMENT = '{_sql_quote(comment)}'"
+            log.debug("[dim]%s[/dim]", ddl)
+            run_sql(conn, ddl)
+            status.stop()
+            log.info(
+                "[green]Created sandbox[/green] %s (zero-copy clone of %s, user=%s)",
+                target_db,
+                source_db,
+                user,
+            )
+            return 0
+        finally:
+            conn.close()
 
 
 def refresh(source: Source) -> int:
@@ -113,24 +119,28 @@ def refresh(source: Source) -> int:
         log.warning("[yellow]Aborted.[/yellow]")
         return 1
 
-    conn = connect(sandbox)
-    try:
-        comment = f"dbts: cloned from {source} at {_now_iso()} by {getpass.getuser()}"
-        ddl = (
-            f"CREATE OR REPLACE DATABASE {_sql_ident(target_db)} "
-            f"CLONE {_sql_ident(source_db)} "
-            f"COMMENT = '{_sql_quote(comment)}'"
-        )
-        log.debug("[dim]%s[/dim]", ddl)
-        run_sql(conn, ddl)
-        log.info(
-            "[green]Refreshed sandbox[/green] %s from %s",
-            target_db,
-            source_db,
-        )
-        return 0
-    finally:
-        conn.close()
+    log_target_info(sandbox)
+    with console.status("[dim]Authenticating to Snowflake…[/dim]") as status:
+        conn = connect(sandbox)
+        try:
+            status.update(f"[dim]Re-cloning {source_db} → {target_db}…[/dim]")
+            comment = f"dbts: cloned from {source} at {_now_iso()} by {getpass.getuser()}"
+            ddl = (
+                f"CREATE OR REPLACE DATABASE {_sql_ident(target_db)} "
+                f"CLONE {_sql_ident(source_db)} "
+                f"COMMENT = '{_sql_quote(comment)}'"
+            )
+            log.debug("[dim]%s[/dim]", ddl)
+            run_sql(conn, ddl)
+            status.stop()
+            log.info(
+                "[green]Refreshed sandbox[/green] %s from %s",
+                target_db,
+                source_db,
+            )
+            return 0
+        finally:
+            conn.close()
 
 
 def drop() -> int:
@@ -141,50 +151,58 @@ def drop() -> int:
         log.warning("[yellow]Aborted.[/yellow]")
         return 1
 
-    conn = connect(sandbox)
-    try:
-        ddl = f"DROP DATABASE IF EXISTS {_sql_ident(target_db)}"
-        log.debug("[dim]%s[/dim]", ddl)
-        run_sql(conn, ddl)
-        log.info("[green]Dropped sandbox[/green] %s", target_db)
-        return 0
-    finally:
-        conn.close()
+    log_target_info(sandbox)
+    with console.status("[dim]Authenticating to Snowflake…[/dim]") as status:
+        conn = connect(sandbox)
+        try:
+            status.update(f"[dim]Dropping {target_db}…[/dim]")
+            ddl = f"DROP DATABASE IF EXISTS {_sql_ident(target_db)}"
+            log.debug("[dim]%s[/dim]", ddl)
+            run_sql(conn, ddl)
+            status.stop()
+            log.info("[green]Dropped sandbox[/green] %s", target_db)
+            return 0
+        finally:
+            conn.close()
 
 
 def status() -> int:
     sandbox = _sandbox_target()
     target_db = sandbox.database.upper()
 
-    conn = connect(sandbox)
-    try:
-        existing = _show_database(conn, target_db)
-        if not existing:
-            log.warning(
-                "[yellow]Sandbox not found:[/yellow] %s\nRun [bold]dbts up --from staging|live[/bold] to create it.",
-                target_db,
-            )
-            return 1
+    log_target_info(sandbox)
+    with console.status("[dim]Authenticating to Snowflake…[/dim]") as spinner:
+        conn = connect(sandbox)
+        try:
+            spinner.update("[dim]Fetching sandbox metadata…[/dim]")
+            existing = _show_database(conn, target_db)
+            spinner.stop()
+            if not existing:
+                log.warning(
+                    "[yellow]Sandbox not found:[/yellow] %s\nRun [bold]dbts up --from staging|live[/bold] to create it.",
+                    target_db,
+                )
+                return 1
 
-        comment = (existing.get("comment") or "").strip()
-        match = COMMENT_PATTERN.match(comment)
-        source = match.group("source") if match else "?"
-        cloned_at = match.group("ts") if match else "?"
-        cloned_by = match.group("user") if match else "?"
+            comment = (existing.get("comment") or "").strip()
+            match = COMMENT_PATTERN.match(comment)
+            source = match.group("source") if match else "?"
+            cloned_at = match.group("ts") if match else "?"
+            cloned_by = match.group("user") if match else "?"
 
-        table = Table(show_header=False, box=None, pad_edge=False)
-        table.add_column(style="bold")
-        table.add_column()
-        table.add_row("database", target_db)
-        table.add_row("created_on", str(existing.get("created_on", "?")))
-        table.add_row("origin", existing.get("origin") or "?")
-        table.add_row("source", source)
-        table.add_row("cloned_at", cloned_at)
-        table.add_row("cloned_by", cloned_by)
-        console.print(table)
-        return 0
-    finally:
-        conn.close()
+            table = Table(show_header=False, box=None, pad_edge=False)
+            table.add_column(style="bold")
+            table.add_column()
+            table.add_row("database", target_db)
+            table.add_row("created_on", str(existing.get("created_on", "?")))
+            table.add_row("origin", existing.get("origin") or "?")
+            table.add_row("source", source)
+            table.add_row("cloned_at", cloned_at)
+            table.add_row("cloned_by", cloned_by)
+            console.print(table)
+            return 0
+        finally:
+            conn.close()
 
 
 def exists() -> bool:

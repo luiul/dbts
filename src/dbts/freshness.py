@@ -30,7 +30,7 @@ from dbts._dbt_ls import (
 )
 from dbts.config import Target
 from dbts.cost import format_relative
-from dbts.snowflake import connect, run_sql
+from dbts.snowflake import connect, log_target_info, run_sql
 
 DEFAULT_STALE_WINDOW = timedelta(hours=6)
 
@@ -73,59 +73,76 @@ def run(
 
     # Auth in parallel with `dbt ls` — same trick as plan.py.
     conn_holder: dict[str, Any] = {}
-    log.info("[dim]Connecting to Snowflake...[/dim]")
+    log_target_info(target)
     conn_thread = threading.Thread(target=_open_connection, args=(target, conn_holder), daemon=True)
     conn_thread.start()
 
-    completed = subprocess.run(
-        cmd,
-        cwd=str(dbt_runner.project_root()),
-        env=dbt_runner.dbt_env(target_name, target),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    if completed.returncode != 0:
-        conn_thread.join()
-        _close(conn_holder.get("conn"))
-        if completed.stderr:
-            console.print(completed.stderr.rstrip(), style="red")
-        if completed.stdout:
-            console.print(completed.stdout.rstrip())
-        return completed.returncode
-
-    records = parse_json_lines(completed.stdout)
-    if not records:
-        conn_thread.join()
-        _close(conn_holder.get("conn"))
-        log.warning("[yellow]Build set is empty[/yellow] — your selectors matched nothing.")
-        return 0
-
-    conn_thread.join()
-    if "error" in conn_holder:
-        log.error(
-            "[red]Cannot check freshness:[/red] %s",
-            _short_error(conn_holder["error"]),
+    with console.status("[dim]Authenticating + parsing project…[/dim]") as spinner:
+        completed = subprocess.run(
+            cmd,
+            cwd=str(dbt_runner.project_root()),
+            env=dbt_runner.dbt_env(target_name, target),
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        return 1
-    conn = conn_holder.get("conn")
-    if conn is None:
-        log.error("[red]Cannot check freshness: no Snowflake connection.[/red]")
-        return 1
 
-    sandbox_user = _resolve_sandbox_user(target_name, target)
+        if completed.returncode != 0:
+            conn_thread.join()
+            _close(conn_holder.get("conn"))
+            spinner.stop()
+            if completed.stderr:
+                console.print(completed.stderr.rstrip(), style="red")
+            if completed.stdout:
+                console.print(completed.stdout.rstrip())
+            return completed.returncode
 
-    try:
-        infos = fetch_table_metadata(conn, records, target_name, sandbox_user)
-    except Exception as e:  # snowflake.connector raises a zoo of types
-        log.error(
-            "[red]Cannot read INFORMATION_SCHEMA:[/red] %s",
-            _short_error(e),
+        records = parse_json_lines(completed.stdout)
+        if not records:
+            conn_thread.join()
+            _close(conn_holder.get("conn"))
+            spinner.stop()
+            log.warning("[yellow]Build set is empty[/yellow] — your selectors matched nothing.")
+            return 0
+
+        conn_thread.join()
+        if "error" in conn_holder:
+            spinner.stop()
+            log.error(
+                "[red]Cannot check freshness:[/red] %s",
+                _short_error(conn_holder["error"]),
+            )
+            return 1
+        conn = conn_holder.get("conn")
+        if conn is None:
+            spinner.stop()
+            log.error("[red]Cannot check freshness: no Snowflake connection.[/red]")
+            return 1
+
+        sandbox_user = _resolve_sandbox_user(target_name, target)
+
+        db_count = len(
+            {_physical(r, target_name, sandbox_user)[0] for r in records if _physical(r, target_name, sandbox_user)[0]}
         )
-        return 1
-    finally:
-        _close(conn)
+        spinner.update(
+            f"[dim]Querying INFORMATION_SCHEMA for {len(records)} model"
+            f"{'s' if len(records) != 1 else ''} across {db_count} database"
+            f"{'s' if db_count != 1 else ''}…[/dim]"
+        )
+
+        try:
+            infos = fetch_table_metadata(conn, records, target_name, sandbox_user)
+        except Exception as e:  # snowflake.connector raises a zoo of types
+            spinner.stop()
+            log.error(
+                "[red]Cannot read INFORMATION_SCHEMA:[/red] %s",
+                _short_error(e),
+            )
+            return 1
+        finally:
+            _close(conn)
+
+        spinner.stop()
 
     info_by_table = {(i.database, i.schema, i.name): i for i in infos}
     sorted_records = topological_sort(records)

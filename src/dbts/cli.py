@@ -28,6 +28,15 @@ against it. dbt pass-through commands accept bare positional model selectors
 (e.g. `dbts build my_model+`) and default to `--target sandbox`.
 
 Profile resolution: $DBTS_PROFILE first, then `profile:` in dbt_project.yml.
+
+[bold]Quickstart[/bold]
+
+  [cyan]dbts up --from staging[/cyan]          Create your sandbox from STG (fast iteration)
+  [cyan]dbts up --from live[/cyan]             Create your sandbox from PROD (post-incident)
+  [cyan]dbts build my_model+[/cyan]            Build my_model and its descendants in sandbox
+  [cyan]dbts plan tag:hourly --cost[/cyan]     Preview build set + Snowflake cost estimate
+  [cyan]dbts freshness --since 24h[/cyan]      Audit which lineage tables are stale
+  [cyan]dbts status[/cyan]                     Show sandbox source / age / owner
 """
 
 app = typer.Typer(
@@ -68,9 +77,16 @@ class TargetEnum(StrEnum):
 
 @app.command("up", rich_help_panel=PANEL_SANDBOX)
 def cmd_up(
-    from_: SourceEnum = typer.Option(..., "--from", help="Database to clone from."),
+    from_: SourceEnum = typer.Option(
+        ...,
+        "--from",
+        help="Database to clone from. staging = fast iteration, live = production data.",
+    ),
 ) -> None:
-    """Create the sandbox as a zero-copy clone of staging or live."""
+    """Create the sandbox as a zero-copy clone (--from staging|live).
+
+    Example: dbts up --from staging
+    """
     _run_or_exit(lambda: clone.up(from_.value))
 
 
@@ -78,35 +94,58 @@ def cmd_up(
 def cmd_refresh(
     from_: SourceEnum = typer.Option(..., "--from", help="Database to re-clone from."),
 ) -> None:
-    """Drop and re-create the sandbox from staging or live."""
+    """Drop and re-create the sandbox (--from staging|live).
+
+    Example: dbts refresh --from live
+    """
     _run_or_exit(lambda: clone.refresh(from_.value))
 
 
 @app.command("drop", rich_help_panel=PANEL_SANDBOX)
 def cmd_drop() -> None:
-    """Drop the sandbox database."""
+    """Drop the sandbox database.
+
+    Example: dbts drop
+    """
     _run_or_exit(clone.drop)
 
 
 @app.command("status", rich_help_panel=PANEL_SANDBOX)
 def cmd_status() -> None:
-    """Show the sandbox's source, age, and owner."""
+    """Show the sandbox's source, age, and owner.
+
+    Example: dbts status
+    """
     _run_or_exit(clone.status)
 
 
-@app.command("publish", rich_help_panel=PANEL_SANDBOX)
+@app.command(
+    "publish",
+    rich_help_panel=PANEL_SANDBOX,
+    short_help="Grant ROLE PUBLIC read access to the sandbox.",
+)
 def cmd_publish(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
-    """Grant ROLE PUBLIC read access to the sandbox (incl. future objects)."""
+    """Grant ROLE PUBLIC read access to the sandbox (incl. future objects). Use --yes to skip the prompt.
+
+    Example: dbts publish --yes
+    """
     _run_or_exit(lambda: publish.publish(yes=yes))
 
 
-@app.command("unpublish", rich_help_panel=PANEL_SANDBOX)
+@app.command(
+    "unpublish",
+    rich_help_panel=PANEL_SANDBOX,
+    short_help="Revoke ROLE PUBLIC's read access to the sandbox.",
+)
 def cmd_unpublish(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
-    """Revoke ROLE PUBLIC's read access to the sandbox."""
+    """Revoke ROLE PUBLIC's read access to the sandbox. Use --yes to skip the prompt.
+
+    Example: dbts unpublish --yes
+    """
     _run_or_exit(lambda: publish.unpublish(yes=yes))
 
 
@@ -130,6 +169,25 @@ DBT_SUBCOMMANDS: tuple[str, ...] = (
     "show",
     "clean",
 )
+
+# One-line example shown in `dbts <subcommand> --help`. Pick something realistic
+# enough that copy-pasting it onto a project gives a useful result.
+_DBT_HELP_EXAMPLES: dict[str, str] = {
+    "build": "dbts build my_model+ --exclude tag:slow",
+    "run": "dbts run my_model+",
+    "test": "dbts test my_model",
+    "compile": "dbts compile my_model",
+    "debug": "dbts debug",
+    "seed": "dbts seed",
+    "snapshot": "dbts snapshot",
+    "ls": "dbts ls --resource-type model",
+    "deps": "dbts deps",
+    "source": "dbts source freshness",
+    "docs": "dbts docs generate",
+    "parse": "dbts parse",
+    "show": "dbts show my_model --limit 10",
+    "clean": "dbts clean",
+}
 
 # Subcommands where bare positional args (e.g. `my_model+`) should be promoted
 # to `--select <args>` so users can type `dbts build my_model+` like dbt 1.x docs imply.
@@ -234,12 +292,25 @@ def _make_dbt_passthrough(subcommand: str):
         raise typer.Exit(code=rc)
 
     _cmd.__name__ = f"dbt_{subcommand}"
-    _cmd.__doc__ = f"Pass-through to `dbt {subcommand}`."
+    example = _DBT_HELP_EXAMPLES.get(subcommand)
+    if example:
+        _cmd.__doc__ = (
+            f"Run `dbt {subcommand}` against --target (default: sandbox). "
+            f"Forwards selectors and dbt flags; bare positional names are auto-promoted to --select.\n\n"
+            f"Example: {example}"
+        )
+    else:
+        _cmd.__doc__ = f"Pass-through to `dbt {subcommand}`."
     return _cmd
 
 
 for _sub in DBT_SUBCOMMANDS:
-    app.command(_sub, context_settings=DBT_CONTEXT_SETTINGS, rich_help_panel=PANEL_DBT)(_make_dbt_passthrough(_sub))
+    app.command(
+        _sub,
+        context_settings=DBT_CONTEXT_SETTINGS,
+        rich_help_panel=PANEL_DBT,
+        short_help=f"Run `dbt {_sub}` (forwards selectors and flags).",
+    )(_make_dbt_passthrough(_sub))
 
 
 @app.command(
@@ -268,7 +339,10 @@ def cmd_plan(
         help="Lookback window for QUERY_HISTORY when --cost is on. Default: 7.",
     ),
 ) -> None:
-    """Preview the build set for given selectors. Optionally estimate Snowflake cost."""
+    """Preview the build set for given selectors. Optionally estimate Snowflake cost.
+
+    Example: dbts plan tag:hourly --cost --days 14
+    """
     try:
         target_cfg = read_profile(default_profile_name(), target.value)
         forwarded = _promote_selectors("ls", list(ctx.args))
@@ -302,7 +376,10 @@ def cmd_freshness(
         ),
     ),
 ) -> None:
-    """Audit lineage freshness — flag tables not touched recently."""
+    """Audit lineage freshness — flag tables not touched recently.
+
+    Example: dbts freshness --since 24h --target live
+    """
     try:
         target_cfg = read_profile(default_profile_name(), target.value)
         forwarded = _promote_selectors("ls", list(ctx.args))

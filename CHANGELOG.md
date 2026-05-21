@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-21
+
+### Added
+- Snowflake auth now retries transient failures (operational/network errors) up to two times with short backoff (0.5s, 1.5s) before giving up. Misconfig errors (`ProgrammingError`, bad role/warehouse, etc.) still fail fast on the first attempt — retrying them is just user-hostile noise. Targets the "looks hung after browser SSO completed" case where one packet drops on the way back.
+- In-flight feedback for every Snowflake-touching command. `dbts up`, `refresh`, `drop`, `status`, `publish`, `unpublish`, `plan --cost`, and `freshness` now show a labeled spinner that updates as the command moves through stages (`Authenticating → Checking sandbox state → Cloning DB_A → DB_B → done`). `publish`/`unpublish` show per-statement progress (`Granting USAGE on database (1/7)…`) so a 7-statement grant cycle no longer looks frozen.
+- Each Snowflake-touching command prints a one-line dim header with `target / role / warehouse / account / user` before connecting, so wrong-role/wrong-warehouse problems surface up front instead of mid-DDL.
+- `dbts --help` Quickstart epilog with six representative invocations covering the common workflows (sandbox creation from staging vs. live, build, plan with cost, freshness, status).
+- Per-command `Example:` lines under `dbts <cmd> --help` for `up`, `refresh`, `drop`, `status`, `publish`, `unpublish`, `plan`, `freshness`, and all 14 dbt pass-through subcommands. `dbts up --help` now also documents that `--from staging` favors fast iteration vs. `--from live` for production data.
+- `tests/test_snowflake_retry.py` — three regression tests for the retry path (succeeds after transient errors, fast-fails on misconfig, raises after max attempts).
+
+### Changed
+- `dbt pass-through` panel rows in `dbts --help` now read `Run `dbt build` (forwards selectors and flags).` instead of the bare `Pass-through to `dbt build`.`. The full description (with the auto-promoted-to-`--select` note and the example) is shown in `dbts <cmd> --help`. Achieved via Typer's `short_help` so panel rows stay one line.
+- `dbts up` / `dbts refresh` panel rows now indicate `(--from staging|live)` so users discover the required flag without reading the full help.
+- `dbts publish` / `dbts unpublish` panel rows now mention `--yes` to skip the confirmation prompt.
+
 ## [0.7.0] — 2026-05-20
 
 ### Added
@@ -100,7 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pass-through wrapper for `dbt run / build / test / compile / debug / seed / snapshot / ls / deps / source / docs / parse / show / clean`.
 - Profile resolution from `~/.dbt/profiles.yml`.
 
-[Unreleased]: https://github.com/luiul/dbts/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/luiul/dbts/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/luiul/dbts/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/luiul/dbts/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/luiul/dbts/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/luiul/dbts/compare/v0.4.0...v0.5.0

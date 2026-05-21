@@ -29,7 +29,7 @@ from dbts.cost import (
     CostReport,
     ModelStats,
 )
-from dbts.snowflake import connect
+from dbts.snowflake import connect, log_target_info
 
 log = logging.getLogger("dbts.plan")
 console = Console()
@@ -75,45 +75,50 @@ def run(
     conn_holder: dict[str, Any] = {}
     conn_thread: threading.Thread | None = None
     if with_cost:
-        log.info(
-            "[dim]Fetching cost data from Snowflake (last %d days, target=%s)...[/dim]",
-            days,
-            target_name,
-        )
+        log_target_info(target)
+        initial_label = f"[dim]Authenticating + parsing project (cost lookback {days}d, target={target_name})…[/dim]"
         conn_thread = threading.Thread(target=_open_connection, args=(target, conn_holder), daemon=True)
         conn_thread.start()
+    else:
+        initial_label = "[dim]Parsing project with dbt ls…[/dim]"
 
-    completed = subprocess.run(
-        cmd,
-        cwd=str(dbt_runner.project_root()),
-        env=dbt_runner.dbt_env(target_name, target),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    with console.status(initial_label) as spinner:
+        completed = subprocess.run(
+            cmd,
+            cwd=str(dbt_runner.project_root()),
+            env=dbt_runner.dbt_env(target_name, target),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
-    if completed.returncode != 0:
-        if conn_thread is not None:
-            conn_thread.join()
-            _close(conn_holder.get("conn"))
-        if completed.stderr:
-            console.print(completed.stderr.rstrip(), style="red")
-        if completed.stdout:
-            console.print(completed.stdout.rstrip())
-        return completed.returncode
+        if completed.returncode != 0:
+            if conn_thread is not None:
+                conn_thread.join()
+                _close(conn_holder.get("conn"))
+            spinner.stop()
+            if completed.stderr:
+                console.print(completed.stderr.rstrip(), style="red")
+            if completed.stdout:
+                console.print(completed.stdout.rstrip())
+            return completed.returncode
 
-    records = parse_json_lines(completed.stdout)
-    if not records:
-        if conn_thread is not None:
-            conn_thread.join()
-            _close(conn_holder.get("conn"))
-        log.warning("[yellow]Build set is empty[/yellow] — your selectors matched nothing.")
-        return 0
+        records = parse_json_lines(completed.stdout)
+        if not records:
+            if conn_thread is not None:
+                conn_thread.join()
+                _close(conn_holder.get("conn"))
+            spinner.stop()
+            log.warning("[yellow]Build set is empty[/yellow] — your selectors matched nothing.")
+            return 0
 
-    stats_by_model: dict[str, dict[str, ModelStats]] = {}
-    cost_report: CostReport | None = None
-    if with_cost and conn_thread is not None:
-        stats_by_model, cost_report = _finish_cost(records, conn_thread, conn_holder, days, target_name)
+        stats_by_model: dict[str, dict[str, ModelStats]] = {}
+        cost_report: CostReport | None = None
+        if with_cost and conn_thread is not None:
+            spinner.update(f"[dim]Querying QUERY_HISTORY for {len(records)} models…[/dim]")
+            stats_by_model, cost_report = _finish_cost(records, conn_thread, conn_holder, days, target_name)
+
+        spinner.stop()
 
     _render(records, stats_by_model, cost_report)
     return 0
