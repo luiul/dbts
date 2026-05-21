@@ -97,12 +97,22 @@ def run(
                 console.print(completed.stdout.rstrip())
             return completed.returncode
 
-        records = parse_json_lines(completed.stdout)
+        all_records = parse_json_lines(completed.stdout)
+        records = [r for r in all_records if not _is_ephemeral(r)]
+        ephemeral_skipped = len(all_records) - len(records)
         if not records:
             conn_thread.join()
             _close(conn_holder.get("conn"))
             spinner.stop()
-            log.warning("[yellow]Build set is empty[/yellow] — your selectors matched nothing.")
+            if ephemeral_skipped:
+                log.warning(
+                    "[yellow]Build set has %d ephemeral model%s and nothing else[/yellow] — "
+                    "ephemerals compile into CTEs, no table to audit.",
+                    ephemeral_skipped,
+                    "s" if ephemeral_skipped != 1 else "",
+                )
+            else:
+                log.warning("[yellow]Build set is empty[/yellow] — your selectors matched nothing.")
             return 0
 
         conn_thread.join()
@@ -155,6 +165,7 @@ def run(
         since,
         target_name,
         sandbox_user,
+        ephemeral_skipped=ephemeral_skipped,
     )
     return 0
 
@@ -196,6 +207,12 @@ def _short_error(e: Exception) -> str:
 
 
 # ----- record helpers -------------------------------------------------------- #
+
+
+def _is_ephemeral(record: dict) -> bool:
+    """Ephemeral models compile into CTEs — no warehouse table to audit."""
+    cfg = record.get("config") or {}
+    return str(cfg.get("materialized") or "").lower() == "ephemeral"
 
 
 def _physical(record: dict, target_name: str, sandbox_user: str | None) -> tuple[str, str, str]:
@@ -395,6 +412,7 @@ def _render(
     since_str: str | None,
     target_name: str,
     sandbox_user: str | None,
+    ephemeral_skipped: int = 0,
 ) -> None:
     now = datetime.now(tz=UTC)
     stale_records: list[dict] = []
@@ -443,6 +461,8 @@ def _render(
             table.add_row(name, f"{triplet[0]}.{triplet[1]}", ts_str, ago_str, rows_str)
 
     header_bits = [f"[bold]Lineage freshness check[/bold] ({len(records)} models"]
+    if ephemeral_skipped:
+        header_bits.append(f"skipped {ephemeral_skipped} ephemeral{'s' if ephemeral_skipped != 1 else ''}")
     if baseline_ts is not None:
         header_bits.append(f"baseline {baseline_ts.strftime('%Y-%m-%d %H:%M UTC')}")
     if threshold is not None:

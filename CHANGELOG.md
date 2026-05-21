@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-05-21
+
+### Fixed
+- `dbts freshness` now skips ephemeral models. Ephemerals compile into CTEs and have no warehouse table to query, so they always rendered as `(missing)` and red — noise that drowned out actual stale tables. The header now reports the count of skipped ephemerals (e.g. `27 models, skipped 4 ephemerals, baseline …`) so the omission is auditable.
+
 ## [0.8.0] — 2026-05-21
 
 ### Added
@@ -115,7 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pass-through wrapper for `dbt run / build / test / compile / debug / seed / snapshot / ls / deps / source / docs / parse / show / clean`.
 - Profile resolution from `~/.dbt/profiles.yml`.
 
-[Unreleased]: https://github.com/luiul/dbts/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/luiul/dbts/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/luiul/dbts/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/luiul/dbts/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/luiul/dbts/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/luiul/dbts/compare/v0.5.0...v0.6.0

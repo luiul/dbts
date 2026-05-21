@@ -9,6 +9,7 @@ from dbts.freshness import (
     TableInfo,
     _compute_threshold,
     _env_postfix,
+    _is_ephemeral,
     _physical,
     _suggest_rebuild,
     parse_since,
@@ -258,6 +259,33 @@ def test_physical_sensitive_database_postfix_inserted_correctly():
     # Convention: ANALYTICS_SENSITIVE → ANALYTICS_STAGING_SENSITIVE
     db, _, _ = _physical(_record("ANALYTICS_SENSITIVE"), "staging", None)
     assert db == "ANALYTICS_STAGING_SENSITIVE"
+
+
+# ----- _is_ephemeral -------------------------------------------------------- #
+
+
+def test_is_ephemeral_true_for_ephemeral_materialization():
+    record = {"name": "stg_x", "config": {"materialized": "ephemeral"}}
+    assert _is_ephemeral(record) is True
+
+
+def test_is_ephemeral_false_for_table():
+    record = {"name": "fct_x", "config": {"materialized": "table"}}
+    assert _is_ephemeral(record) is False
+
+
+def test_is_ephemeral_false_for_view():
+    record = {"name": "v_x", "config": {"materialized": "view"}}
+    assert _is_ephemeral(record) is False
+
+
+def test_is_ephemeral_case_insensitive():
+    record = {"name": "stg_x", "config": {"materialized": "EPHEMERAL"}}
+    assert _is_ephemeral(record) is True
+
+
+def test_is_ephemeral_handles_missing_config():
+    assert _is_ephemeral({"name": "x"}) is False
 
 
 def test_physical_uses_alias_when_set():
