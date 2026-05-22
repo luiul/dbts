@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-05-22
+
+### Fixed
+- Snowflake auth no longer prints a noisy boto3 traceback when the user's AWS SSO session is stale. The connector probes EC2/Lambda identity via boto3 during platform detection, which surfaces a `NoCredentialsError` traceback through `RichHandler` even though the probe is harmless and `externalbrowser` auth proceeds normally. The probe is now disabled via `SNOWFLAKE_DISABLE_PLATFORM_DETECTION=true` (set before importing the connector), with `botocore`/`boto3`/`urllib3` log levels raised to `ERROR` as a belt-and-suspenders fallback.
+
 ## [0.8.1] — 2026-05-21
 
 ### Fixed

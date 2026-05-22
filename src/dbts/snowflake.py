@@ -1,20 +1,27 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from typing import Any
 
-import snowflake.connector
-from snowflake.connector import SnowflakeConnection
-from snowflake.connector.errors import (
+# The Snowflake connector probes EC2/Lambda/AWS-identity on import-time of its
+# auth path. The probe walks the boto3 credential chain, which surfaces a noisy
+# traceback when the user's AWS SSO session is expired. We never run on AWS, so
+# disable the probe entirely. Must be set before `import snowflake.connector`.
+os.environ.setdefault("SNOWFLAKE_DISABLE_PLATFORM_DETECTION", "true")
+
+import snowflake.connector  # noqa: E402
+from snowflake.connector import SnowflakeConnection  # noqa: E402
+from snowflake.connector.errors import (  # noqa: E402
     DatabaseError,
     InterfaceError,
     OperationalError,
     ProgrammingError,
 )
 
-from dbts.config import Target
+from dbts.config import Target  # noqa: E402
 
 log = logging.getLogger("dbts.snowflake")
 

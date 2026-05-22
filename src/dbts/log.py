@@ -27,3 +27,9 @@ def configure(verbose: bool = False, quiet: bool = False) -> None:
         ],
         force=True,
     )
+    # The Snowflake connector probes boto3 during platform detection. When the
+    # user has a stale AWS SSO session, botocore logs a WARNING with exc_info,
+    # which RichHandler renders as a full traceback panel — even though the
+    # probe is harmless and Snowflake auth proceeds via externalbrowser.
+    for noisy in ("botocore", "boto3", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.ERROR)
