@@ -12,16 +12,16 @@ from typing import Any
 # disable the probe entirely. Must be set before `import snowflake.connector`.
 os.environ.setdefault("SNOWFLAKE_DISABLE_PLATFORM_DETECTION", "true")
 
-import snowflake.connector  # noqa: E402
-from snowflake.connector import SnowflakeConnection  # noqa: E402
-from snowflake.connector.errors import (  # noqa: E402
+import snowflake.connector
+from snowflake.connector import SnowflakeConnection
+from snowflake.connector.errors import (
     DatabaseError,
     InterfaceError,
     OperationalError,
     ProgrammingError,
 )
 
-from dbts.config import Target  # noqa: E402
+from dbts.config import Target
 
 log = logging.getLogger("dbts.snowflake")
 
