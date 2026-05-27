@@ -7,13 +7,13 @@ import threading
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from rich.console import Console
 from rich.table import Table
 
-from dbts import cost, dbt_runner
+from dbts import _viz, cost, dbt_runner
 from dbts._dbt_ls import (
     DEFAULT_OUTPUT_KEYS,
     has_flag,
@@ -41,6 +41,8 @@ def run(
     target: Target,
     with_cost: bool = False,
     days: int = DEFAULT_LOOKBACK_DAYS,
+    output: str = "console",
+    output_file: Path | None = None,
 ) -> int:
     """Preview the build set for the given selectors.
 
@@ -53,6 +55,9 @@ def run(
 
     `dbt ls` and the Snowflake auth+query run in parallel when `with_cost` is
     True, since they're independent.
+
+    When `output == "html"`, write a self-contained graph view to `output_file`
+    (default: `./plan-graph.html`) instead of printing the Rich tables.
     """
     dbt_runner.ensure_dbt_on_path()
 
@@ -120,7 +125,40 @@ def run(
 
         spinner.stop()
 
+    if output == "html":
+        return _write_html(records, stats_by_model, cost_report, target_name, days, with_cost, output_file)
+
     _render(records, stats_by_model, cost_report)
+    return 0
+
+
+def _write_html(
+    records: list[dict],
+    stats_by_model: dict[str, dict[str, ModelStats]],
+    cost_report: CostReport | None,
+    target_name: str,
+    days: int,
+    with_cost: bool,
+    output_file: Path | None,
+) -> int:
+    nodes, edges = _viz.build_plan_graph(records, stats_by_model, cost_report)
+    subtitle_bits = [f"{len(records)} models", f"target={target_name}"]
+    if stats_by_model:
+        subtitle_bits.append(f"cost lookback {days}d")
+    else:
+        subtitle_bits.append("topology only (no --cost)")
+    html = _viz.render_html(
+        nodes,
+        edges,
+        title="dbts plan",
+        subtitle=" · ".join(subtitle_bits),
+    )
+    path = _viz.write_html(html, output_file or Path.cwd() / "plan-graph.html")
+    if with_cost and not stats_by_model:
+        console.print("[dim]No QUERY_HISTORY matched — nodes rendered without cost colouring.[/dim]")
+    elif not with_cost:
+        console.print("[dim]Tip: re-run with --cost to colour nodes by p50 runtime.[/dim]")
+    console.print(f"Wrote [cyan]{path}[/cyan]")
     return 0
 
 
@@ -270,7 +308,7 @@ def _print_footer(
     mat_counts: Counter[str] = Counter(_materialization(r) for r in records)
     console.print(
         f"[bold]Build set:[/bold] {len(records)} model{'s' if len(records) != 1 else ''} "
-        f"across {len(by_dir)} director{'ies' if len(by_dir) != 1 else 'y'}"
+        f"across {len(by_dir)} director{'ies' if len(by_dir) != 1 else 'y'}",
     )
     for mat, count in sorted(mat_counts.items(), key=lambda kv: (-kv[1], kv[0])):
         console.print(f"  {mat:14s} {count}")
@@ -300,7 +338,7 @@ def _print_cost(report: CostReport, days: int) -> None:
         console.print(
             f"  [dim]({report.full_refresh.models_extrapolated} model"
             f"{'s' if report.full_refresh.models_extrapolated != 1 else ''} "
-            f"extrapolated from incremental p50 x {int(cost.FULL_REFRESH_MULTIPLIER)})[/dim]"
+            f"extrapolated from incremental p50 x {int(cost.FULL_REFRESH_MULTIPLIER)})[/dim]",
         )
 
     if report.top_expensive:
@@ -309,7 +347,7 @@ def _print_cost(report: CostReport, days: int) -> None:
         for name, basis, elapsed_s, credits, usd in report.top_expensive:
             arrow = " " if basis == MODE_FULL_REFRESH else "*"
             console.print(
-                f"  {arrow} {name:50s} {cost.format_duration(elapsed_s):>10s}  {credits:>5.2f} credits  ~${usd:>5.2f}"
+                f"  {arrow} {name:50s} {cost.format_duration(elapsed_s):>10s}  {credits:>5.2f} credits  ~${usd:>5.2f}",
             )
         if any(b != MODE_FULL_REFRESH for _, b, _, _, _ in report.top_expensive):
             console.print("  [dim]* extrapolated from incremental p50[/dim]")
@@ -324,7 +362,7 @@ def _print_estimate(label: str, est: BuildEstimate) -> None:
         f"  {label}: "
         f"{cost.format_duration(est.total_elapsed_s):>10s}  "
         f"{est.total_credits:>6.2f} credits  ~${est.total_usd:>6.2f}  "
-        f"[dim]({coverage})[/dim]"
+        f"[dim]({coverage})[/dim]",
     )
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from enum import StrEnum
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -68,6 +69,11 @@ class TargetEnum(StrEnum):
     staging = "staging"
     live = "live"
     dev = "dev"
+
+
+class OutputEnum(StrEnum):
+    console = "console"
+    html = "html"
 
 
 # --------------------------------------------------------------------------- #
@@ -338,6 +344,17 @@ def cmd_plan(
         max=365,
         help="Lookback window for QUERY_HISTORY when --cost is on. Default: 7.",
     ),
+    output: OutputEnum = typer.Option(
+        OutputEnum.console,
+        "--output",
+        "-o",
+        help="Output format. `console` (default) prints Rich tables. `html` writes an interactive DAG (vis-network via CDN).",
+    ),
+    output_file: Path | None = typer.Option(
+        None,
+        "--output-file",
+        help="Path for `--output html`. Default: ./plan-graph.html. Existing files are overwritten.",
+    ),
 ) -> None:
     """Preview the build set for given selectors. Optionally estimate Snowflake cost.
 
@@ -346,7 +363,15 @@ def cmd_plan(
     try:
         target_cfg = read_profile(default_profile_name(), target.value)
         forwarded = _promote_selectors("ls", list(ctx.args))
-        rc = plan.run(forwarded, target.value, target_cfg, with_cost=cost, days=days)
+        rc = plan.run(
+            forwarded,
+            target.value,
+            target_cfg,
+            with_cost=cost,
+            days=days,
+            output=output.value,
+            output_file=output_file,
+        )
     except ConfigError as e:
         _print_config_error(e)
         raise typer.Exit(code=1) from e
@@ -375,6 +400,17 @@ def cmd_freshness(
             "Default: 6 hours before the freshest table in the set."
         ),
     ),
+    output: OutputEnum = typer.Option(
+        OutputEnum.console,
+        "--output",
+        "-o",
+        help="Output format. `console` (default) prints a Rich table. `html` writes an interactive DAG with stale tables in red.",
+    ),
+    output_file: Path | None = typer.Option(
+        None,
+        "--output-file",
+        help="Path for `--output html`. Default: ./freshness-graph.html. Existing files are overwritten.",
+    ),
 ) -> None:
     """Audit lineage freshness — flag tables not touched recently.
 
@@ -383,7 +419,14 @@ def cmd_freshness(
     try:
         target_cfg = read_profile(default_profile_name(), target.value)
         forwarded = _promote_selectors("ls", list(ctx.args))
-        rc = freshness.run(forwarded, target.value, target_cfg, since=since)
+        rc = freshness.run(
+            forwarded,
+            target.value,
+            target_cfg,
+            since=since,
+            output=output.value,
+            output_file=output_file,
+        )
     except ConfigError as e:
         _print_config_error(e)
         raise typer.Exit(code=1) from e

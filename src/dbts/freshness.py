@@ -16,21 +16,26 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from rich.console import Console
 from rich.table import Table
 
-from dbts import dbt_runner
+from dbts import _viz, dbt_runner
 from dbts._dbt_ls import (
     DEFAULT_OUTPUT_KEYS,
     has_flag,
     parse_json_lines,
     strip_ls_incompatible,
 )
+from dbts._viz import build_dag, name_from_unique_id
 from dbts.config import Target
 from dbts.cost import format_relative
 from dbts.snowflake import connect, log_target_info, run_sql
+
+# Re-exported for backward compatibility with prior imports.
+_name_from_unique_id = name_from_unique_id
 
 DEFAULT_STALE_WINDOW = timedelta(hours=6)
 
@@ -52,8 +57,16 @@ def run(
     target_name: str,
     target: Target,
     since: str | None = None,
+    output: str = "console",
+    output_file: Path | None = None,
 ) -> int:
-    """Audit `LAST_ALTERED` for every table in the selected lineage."""
+    """Audit `LAST_ALTERED` for every table in the selected lineage.
+
+    When `output == "html"`, write a self-contained DAG to `output_file`
+    (default: `./freshness-graph.html`) instead of printing the Rich table.
+    Stale nodes are red, fresh green, no-data grey; edges between two stale
+    nodes are red so a broken chain stands out at a glance.
+    """
     dbt_runner.ensure_dbt_on_path()
 
     arg_list = strip_ls_incompatible(list(args))
@@ -157,6 +170,19 @@ def run(
     info_by_table = {(i.database, i.schema, i.name): i for i in infos}
     sorted_records = topological_sort(records)
     threshold, baseline_ts = _compute_threshold(infos, since)
+
+    if output == "html":
+        return _write_html(
+            sorted_records,
+            info_by_table,
+            threshold,
+            baseline_ts,
+            since,
+            target_name,
+            sandbox_user,
+            output_file,
+        )
+
     _render(
         sorted_records,
         info_by_table,
@@ -167,6 +193,41 @@ def run(
         sandbox_user,
         ephemeral_skipped=ephemeral_skipped,
     )
+    return 0
+
+
+def _write_html(
+    sorted_records: list[dict],
+    info_by_table: dict[tuple[str, str, str], TableInfo],
+    threshold: datetime | None,
+    baseline_ts: datetime | None,
+    since_str: str | None,
+    target_name: str,
+    sandbox_user: str | None,
+    output_file: Path | None,
+) -> int:
+    nodes, edges = _viz.build_freshness_graph(
+        sorted_records,
+        info_by_table,
+        threshold,
+        target_name,
+        sandbox_user,
+    )
+    subtitle_bits = [f"{len(sorted_records)} models", f"target={target_name}"]
+    if baseline_ts is not None:
+        subtitle_bits.append(f"baseline {baseline_ts.strftime('%Y-%m-%d %H:%M UTC')}")
+    if since_str:
+        subtitle_bits.append(f"--since {since_str}")
+    elif threshold is not None:
+        subtitle_bits.append("threshold = baseline - 6h")
+    html = _viz.render_html(
+        nodes,
+        edges,
+        title="dbts freshness",
+        subtitle=" · ".join(subtitle_bits),
+    )
+    path = _viz.write_html(html, output_file or Path.cwd() / "freshness-graph.html")
+    console.print(f"Wrote [cyan]{path}[/cyan]")
     return 0
 
 
@@ -318,16 +379,9 @@ def topological_sort(records: list[dict]) -> list[dict]:
     for stability. Two records sharing a name (different projects) is not a
     real-world scenario — a single dbt build set has unique names.
     """
-    by_name: dict[str, dict] = {r["name"]: r for r in records if r.get("name")}
-
-    in_degree: dict[str, int] = dict.fromkeys(by_name, 0)
-    children: dict[str, list[str]] = defaultdict(list)
-    for name, r in by_name.items():
-        for parent_uid in (r.get("depends_on") or {}).get("nodes") or []:
-            parent_name = _name_from_unique_id(parent_uid)
-            if parent_name and parent_name in by_name and parent_name != name:
-                children[parent_name].append(name)
-                in_degree[name] += 1
+    dag = build_dag(records)
+    by_name = dag.by_name
+    in_degree: dict[str, int] = {name: len(dag.parents.get(name) or []) for name in by_name}
 
     ready = sorted(n for n, deg in in_degree.items() if deg == 0)
     out: list[dict] = []
@@ -335,7 +389,7 @@ def topological_sort(records: list[dict]) -> list[dict]:
         next_ready: list[str] = []
         for n in ready:
             out.append(by_name[n])
-            for child in children.get(n, []):
+            for child in dag.children.get(n, []):
                 in_degree[child] -= 1
                 if in_degree[child] == 0:
                     next_ready.append(child)
@@ -349,12 +403,6 @@ def topological_sort(records: list[dict]) -> list[dict]:
             if id(by_name[n]) not in seen:
                 out.append(by_name[n])
     return out
-
-
-def _name_from_unique_id(unique_id: str) -> str | None:
-    """Extract the model name from `model.<project>.<name>` references."""
-    m = re.match(r"^model\.[^.]+\.(.+)$", unique_id)
-    return m.group(1) if m else None
 
 
 # ----- threshold ------------------------------------------------------------- #

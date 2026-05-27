@@ -74,8 +74,12 @@ dbts unpublish                             revoke ROLE PUBLIC's access
 dbts plan      [selectors...]              preview the build set
   --cost                                     estimate credits + runtime from QUERY_HISTORY
   --days N                                   QUERY_HISTORY lookback window (default 7, max 365)
+  --output console|html                      render output (html writes an interactive DAG)
+  --output-file PATH                         html output path (default ./plan-graph.html)
 dbts freshness [selectors...]              audit lineage; flag stale tables, suggest a rebuild
   --since                                    explicit threshold (24h, 7d, 1w, or ISO datetime)
+  --output console|html                      render output (html writes an interactive DAG)
+  --output-file PATH                         html output path (default ./freshness-graph.html)
 ```
 
 **dbt pass-through** — forwarded to dbt with `--target sandbox` by default:
@@ -124,6 +128,16 @@ Pass `--cost` to also estimate Snowflake credits and runtime from `SNOWFLAKE.ACC
 
 Cost estimates require a structured `query_tag` with a `model` field (HelloFresh's `set_query_tag` macro is one example) and read access to `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`. USD uses $3.00/credit by default; override with `$DBTS_CREDIT_RATE`. If access is missing, `dbts plan` falls back to the offline output.
 
+### Graph view (`--output html`)
+
+```bash
+dbts plan tag:hourly --output html               # writes ./plan-graph.html (topology only)
+dbts plan tag:hourly --cost --output html        # nodes coloured by p50 runtime / credits
+dbts plan tag:hourly --output html --output-file /tmp/plan.html
+```
+
+Renders the build set as an interactive top-down DAG (vis-network, loaded from `unpkg.com`). Nodes scale with median runtime and shade red as runtime climbs; pass `--cost` for cost-based colouring (offline runs render neutral grey). Hover for a tooltip with materialization, parents, p50 runtime, estimated credits/USD, and tags. Type in the search box to filter by name. Existing files are overwritten silently.
+
 ## Auditing freshness after an incident
 
 `dbts freshness` answers "did data flow correctly through this lineage?" by reading `INFORMATION_SCHEMA.TABLES.LAST_ALTERED` for every table in the selected build set, sorting topologically (parents before children), and highlighting stale links in red.
@@ -167,6 +181,15 @@ dbts freshness recipe+ --since 24h                  # relative (s, m, h, d, w)
 ```
 
 The footer prints a copy-pasteable `dbts build --select X+` line that covers the minimum set of stale-roots needed to catch the chain back up — building any model that's already fresh upstream is avoided.
+
+### Graph view (`--output html`)
+
+```bash
+dbts freshness recipe+ --output html             # writes ./freshness-graph.html
+dbts freshness --since 24h --output html --output-file /tmp/freshness.html
+```
+
+Renders the lineage as a top-down DAG with stale tables in red, fresh in green, missing/no-data in grey. Edges between two stale nodes are coloured red so a broken chain is visible at a glance. Hover for `database.schema`, `last_altered`, time-ago and row count; type in the search box to filter.
 
 ### What `LAST_ALTERED` actually means
 

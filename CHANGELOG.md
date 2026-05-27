@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `dbts plan --output html` and `dbts freshness --output html` write a self-contained interactive DAG to `./plan-graph.html` / `./freshness-graph.html` (override with `--output-file`). Plan nodes are coloured/sized by p50 runtime when `--cost` is on (red high → green low) and grey otherwise; freshness nodes are red/green/grey by staleness with red edges marking broken chains (both endpoints stale). Layout is hierarchical top-down via vis-network (loaded from `unpkg.com`); a search box filters nodes by name. Console output is unchanged when `--output` is omitted. Closes #15.
+- `src/dbts/_viz.py` — shared module exposing `build_dag` (the DAG-extraction logic previously inlined in `freshness.topological_sort`), node/edge dataclasses, color/size helpers, and the HTML template. `freshness.topological_sort` now delegates to `build_dag` so both views agree on the edge set.
+
 ## [0.8.2] — 2026-05-22
 
 ### Fixed
