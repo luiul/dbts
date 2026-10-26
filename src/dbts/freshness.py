@@ -59,6 +59,7 @@ def run(
     since: str | None = None,
     output: str = "console",
     output_file: Path | None = None,
+    open_browser: bool = True,
 ) -> int:
     """Audit `LAST_ALTERED` for every table in the selected lineage.
 
@@ -181,6 +182,7 @@ def run(
             target_name,
             sandbox_user,
             output_file,
+            open_browser,
         )
 
     _render(
@@ -205,6 +207,7 @@ def _write_html(
     target_name: str,
     sandbox_user: str | None,
     output_file: Path | None,
+    open_browser: bool = True,
 ) -> int:
     nodes, edges = _viz.build_freshness_graph(
         sorted_records,
@@ -228,6 +231,8 @@ def _write_html(
     )
     path = _viz.write_html(html, output_file or Path.cwd() / "freshness-graph.html")
     console.print(f"Wrote [cyan]{path}[/cyan]")
+    if open_browser:
+        _viz.open_in_browser(path)
     return 0
 
 

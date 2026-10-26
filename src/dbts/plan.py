@@ -43,6 +43,7 @@ def run(
     days: int = DEFAULT_LOOKBACK_DAYS,
     output: str = "console",
     output_file: Path | None = None,
+    open_browser: bool = True,
 ) -> int:
     """Preview the build set for the given selectors.
 
@@ -126,7 +127,9 @@ def run(
         spinner.stop()
 
     if output == "html":
-        return _write_html(records, stats_by_model, cost_report, target_name, days, with_cost, output_file)
+        return _write_html(
+            records, stats_by_model, cost_report, target_name, days, with_cost, output_file, open_browser
+        )
 
     _render(records, stats_by_model, cost_report)
     return 0
@@ -140,6 +143,7 @@ def _write_html(
     days: int,
     with_cost: bool,
     output_file: Path | None,
+    open_browser: bool = True,
 ) -> int:
     nodes, edges = _viz.build_plan_graph(records, stats_by_model, cost_report)
     subtitle_bits = [f"{len(records)} models", f"target={target_name}"]
@@ -159,6 +163,8 @@ def _write_html(
     elif not with_cost:
         console.print("[dim]Tip: re-run with --cost to colour nodes by p50 runtime.[/dim]")
     console.print(f"Wrote [cyan]{path}[/cyan]")
+    if open_browser:
+        _viz.open_in_browser(path)
     return 0
 
 

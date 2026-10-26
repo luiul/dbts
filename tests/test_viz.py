@@ -161,6 +161,23 @@ def test_build_plan_graph_tooltip_contains_credits():
     assert "median run" in title
 
 
+def test_build_plan_graph_label_html_with_cost():
+    records = [_model("hot", materialized="incremental")]
+    stats = {"hot": {"incremental": _stat("hot", 45.0, warehouse="MEDIUM")}}
+    nodes, _ = build_plan_graph(records, stats_by_model=stats)
+    label = nodes[0].label_html
+    # Bold name line + "materialization · runtime" + "~credits cr".
+    assert "<b>hot</b>" in label
+    assert "incremental · 45.0s" in label
+    assert "cr" in label
+    assert label.count("\n") == 2
+
+
+def test_build_plan_graph_label_html_without_cost():
+    nodes, _ = build_plan_graph([_model("a", materialized="view")], stats_by_model={})
+    assert nodes[0].label_html == "<b>a</b>\nview"
+
+
 # ----- freshness graph ----------------------------------------------------- #
 
 
@@ -182,6 +199,24 @@ def test_build_freshness_graph_color_buckets():
     assert by_id["fresh"].color == COLOR_GREEN
     assert by_id["stale"].color == COLOR_RED
     assert by_id["missing"].color == COLOR_GREY
+
+
+def test_build_freshness_graph_label_html_per_state():
+    now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    threshold = now - timedelta(hours=6)
+    records = [_model("fresh"), _model("stale"), _model("missing")]
+    info_by_table = {
+        ("DB", "S", "FRESH"): _info("fresh", now - timedelta(minutes=30), rows=1_200_000),
+        ("DB", "S", "STALE"): _info("stale", now - timedelta(days=2), rows=500),
+    }
+    nodes, _ = build_freshness_graph(records, info_by_table, threshold, target_name="live", sandbox_user=None)
+    by_id = {n.id: n for n in nodes}
+    assert by_id["fresh"].label_html.startswith("<b>fresh</b>\n")
+    assert "1.2M rows" in by_id["fresh"].label_html
+    assert "stale · " in by_id["stale"].label_html
+    assert "500 rows" in by_id["stale"].label_html
+    # no_data node has no rows line.
+    assert by_id["missing"].label_html == "<b>missing</b>\nno data"
 
 
 def test_build_freshness_graph_marks_broken_chain_edges():

@@ -15,6 +15,7 @@ from dbts.cost import (
     credit_rate,
     credits_for,
     estimate_build,
+    format_count,
     format_duration,
     format_relative,
     index_stats,
@@ -100,6 +101,26 @@ def test_format_duration_minutes():
 
 def test_format_duration_hours():
     assert format_duration(7250.0) == "2h 0m"
+
+
+# ---------------------------- format_count --------------------------------- #
+
+
+def test_format_count_under_thousand():
+    assert format_count(0) == "0"
+    assert format_count(999) == "999"
+
+
+def test_format_count_thousands():
+    assert format_count(1234) == "1.2K"
+
+
+def test_format_count_millions():
+    assert format_count(1_200_000) == "1.2M"
+
+
+def test_format_count_billions():
+    assert format_count(3_400_000_000) == "3.4B"
 
 
 # ---------------------------- format_relative ------------------------------ #

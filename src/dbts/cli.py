@@ -344,6 +344,11 @@ def cmd_plan(
         max=365,
         help="Lookback window for QUERY_HISTORY when --cost is on. Default: 7.",
     ),
+    html: bool = typer.Option(
+        False,
+        "--html",
+        help="Shortcut for `--output html`. Writes the interactive DAG to ./plan-graph.html (or --output-file).",
+    ),
     output: OutputEnum = typer.Option(
         OutputEnum.console,
         "--output",
@@ -353,13 +358,20 @@ def cmd_plan(
     output_file: Path | None = typer.Option(
         None,
         "--output-file",
-        help="Path for `--output html`. Default: ./plan-graph.html. Existing files are overwritten.",
+        help="Path for HTML output. Default: ./plan-graph.html. A `.html` path implies `--html`. Existing files are overwritten.",
+    ),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help="Open the HTML graph in your browser after writing it. Default: open.",
     ),
 ) -> None:
     """Preview the build set for given selectors. Optionally estimate Snowflake cost.
 
     Example: dbts plan tag:hourly --cost --days 14
     """
+    if output is OutputEnum.console and (html or _is_html_path(output_file)):
+        output = OutputEnum.html
     try:
         target_cfg = read_profile(default_profile_name(), target.value)
         forwarded = _promote_selectors("ls", list(ctx.args))
@@ -371,6 +383,7 @@ def cmd_plan(
             days=days,
             output=output.value,
             output_file=output_file,
+            open_browser=open_browser,
         )
     except ConfigError as e:
         _print_config_error(e)
@@ -400,6 +413,11 @@ def cmd_freshness(
             "Default: 6 hours before the freshest table in the set."
         ),
     ),
+    html: bool = typer.Option(
+        False,
+        "--html",
+        help="Shortcut for `--output html`. Writes the interactive DAG to ./freshness-graph.html (or --output-file).",
+    ),
     output: OutputEnum = typer.Option(
         OutputEnum.console,
         "--output",
@@ -409,13 +427,20 @@ def cmd_freshness(
     output_file: Path | None = typer.Option(
         None,
         "--output-file",
-        help="Path for `--output html`. Default: ./freshness-graph.html. Existing files are overwritten.",
+        help="Path for HTML output. Default: ./freshness-graph.html. A `.html` path implies `--html`. Existing files are overwritten.",
+    ),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help="Open the HTML graph in your browser after writing it. Default: open.",
     ),
 ) -> None:
     """Audit lineage freshness — flag tables not touched recently.
 
     Example: dbts freshness --since 24h --target live
     """
+    if output is OutputEnum.console and (html or _is_html_path(output_file)):
+        output = OutputEnum.html
     try:
         target_cfg = read_profile(default_profile_name(), target.value)
         forwarded = _promote_selectors("ls", list(ctx.args))
@@ -426,6 +451,7 @@ def cmd_freshness(
             since=since,
             output=output.value,
             output_file=output_file,
+            open_browser=open_browser,
         )
     except ConfigError as e:
         _print_config_error(e)
@@ -436,6 +462,11 @@ def cmd_freshness(
 # --------------------------------------------------------------------------- #
 # Helpers                                                                     #
 # --------------------------------------------------------------------------- #
+
+
+def _is_html_path(path: Path | None) -> bool:
+    """True when `path` looks like an HTML file, so `--output html` can be inferred."""
+    return path is not None and path.suffix.lower() == ".html"
 
 
 def _print_config_error(e: ConfigError) -> None:

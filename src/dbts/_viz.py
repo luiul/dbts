@@ -89,6 +89,7 @@ class GraphNode:
     size: int
     title: str
     level: int
+    label_html: str = ""
     group: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -183,6 +184,7 @@ def build_plan_graph(
         materialization = str(cfg.get("materialized") or "?")
         tags = sorted(record.get("tags") or [])
         parents = dag.parents.get(name, [])
+        name_esc = html.escape(name)
 
         modes = stats_by_model.get(name) or {}
         stat = modes.get(_cost.MODE_INCREMENTAL) or modes.get(_cost.MODE_FULL_REFRESH)
@@ -204,6 +206,9 @@ def build_plan_graph(
             ]
             if tags:
                 title_lines.append(f"tags: {', '.join(tags)}")
+            label_html = (
+                f"<b>{name_esc}</b>\n{materialization} · {_cost.format_duration(stat.p50_elapsed_s)}\n~{credits:.2f} cr"
+            )
         else:
             color = COLOR_GREY
             size = NODE_SIZE_MIN + 6
@@ -215,11 +220,13 @@ def build_plan_graph(
             ]
             if tags:
                 title_lines.append(f"tags: {', '.join(tags)}")
+            label_html = f"<b>{name_esc}</b>\n{materialization}"
 
         nodes.append(
             GraphNode(
                 id=name,
                 label=name,
+                label_html=label_html,
                 color=color,
                 size=size,
                 title="\n".join(title_lines),
@@ -284,10 +291,18 @@ def build_freshness_graph(
             f"rows: {rows_str}",
             f"status: {node_state}",
         ]
+        label_lines = [f"<b>{html.escape(name)}</b>"]
+        if node_state == "no_data":
+            label_lines.append("no data")
+        else:
+            label_lines.append(f"stale · {ago_str}" if node_state == "stale" else ago_str)
+            if info is not None and info.row_count is not None:
+                label_lines.append(f"{_cost.format_count(info.row_count)} rows")
         nodes.append(
             GraphNode(
                 id=name,
                 label=name,
+                label_html="\n".join(label_lines),
                 color=color,
                 size=NODE_SIZE_MIN + (8 if node_state == "stale" else 4),
                 title="\n".join(title_lines),
@@ -379,9 +394,17 @@ _HTML_TEMPLATE = Template(
     const sizeSpread = Math.max(1, sizeRange.max - sizeRange.min);
     const borderFor = s => 1 + Math.round(((s - sizeRange.min) / sizeSpread) * 4);
 
+    // Multi-font node labels: bold name line + dimmer secondary fact lines.
+    const NODE_FONT = { multi: 'html', size: 13, color: '#334155', face: 'monospace',
+      bold: { color: '#0f172a', size: 16, face: 'monospace' },
+      ital: { color: '#334155', size: 13, face: 'monospace' } };
+    const NODE_FONT_DIM = { multi: 'html', size: 13, color: 'rgba(15,23,42,0.35)', face: 'monospace',
+      bold: { color: 'rgba(15,23,42,0.45)', size: 16, face: 'monospace' },
+      ital: { color: 'rgba(15,23,42,0.35)', size: 13, face: 'monospace' } };
+
     const nodes = new vis.DataSet(PAYLOAD.nodes.map(n => ({
       id: n.id,
-      label: n.label,
+      label: n.label_html || n.label,
       title: n.title,
       level: n.level,
       group: n.group,
@@ -389,10 +412,10 @@ _HTML_TEMPLATE = Template(
       borderWidth: borderFor(n.size),
       borderWidthSelected: borderFor(n.size) + 1,
       shapeProperties: { borderRadius: 6 },
-      margin: { top: 8, bottom: 8, left: 12, right: 12 },
+      margin: { top: 10, bottom: 10, left: 14, right: 14 },
       color: { background: n.color, border: n.color,
                highlight: { background: n.color, border: '#38bdf8' } },
-      font: { color: '#0f172a', size: 15, face: 'monospace', bold: { color: '#0f172a' } },
+      font: NODE_FONT,
     })));
     const edges = new vis.DataSet(PAYLOAD.edges.map((e, i) => ({
       id: 'e' + i,
@@ -404,9 +427,9 @@ _HTML_TEMPLATE = Template(
     })));
     const network = new vis.Network(container, { nodes, edges }, {
       layout: { hierarchical: { enabled: true, direction: 'LR', sortMethod: 'directed',
-                                nodeSpacing: 50, levelSeparation: 480, blockShifting: true,
+                                nodeSpacing: 120, levelSeparation: 480, blockShifting: true,
                                 edgeMinimization: true, parentCentralization: true,
-                                treeSpacing: 80 } },
+                                treeSpacing: 160 } },
       physics: { enabled: false },
       interaction: { hover: true, tooltipDelay: 120, navigationButtons: true, keyboard: true },
       edges: { width: 1 },
@@ -424,7 +447,7 @@ _HTML_TEMPLATE = Template(
           color: match
             ? { background: base, border: base }
             : { background: 'rgba(75,85,99,0.25)', border: 'rgba(75,85,99,0.25)' },
-          font: { color: match ? '#0f172a' : 'rgba(15,23,42,0.35)', size: 15, face: 'monospace' },
+          font: match ? NODE_FONT : NODE_FONT_DIM,
         };
       });
       nodes.update(updates);
@@ -476,7 +499,8 @@ def _default_legend() -> str:
         '<div class="row"><span class="swatch" style="background:#ef4444"></span>stale / expensive</div>'
         '<div class="row"><span class="swatch" style="background:#9ca3af"></span>no data</div>'
         '<div class="scale"><div class="bar"></div></div>'
-        "<small>Border thickness scales with intensity. Type to filter. Drag to pan, scroll to zoom.</small>"
+        "<small>Nodes show name · materialization · runtime (plan) or staleness · rows (freshness). "
+        "Border thickness scales with intensity. Type to filter. Drag to pan, scroll to zoom.</small>"
     )
 
 
@@ -486,3 +510,13 @@ def write_html(content: str, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def open_in_browser(path: Path) -> bool:
+    """Open `path` in the default browser. Returns True on success, False otherwise."""
+    import webbrowser
+
+    try:
+        return webbrowser.open(path.as_uri())
+    except Exception:  # headless / no browser — caller still printed the path
+        return False

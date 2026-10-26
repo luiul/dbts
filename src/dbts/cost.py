@@ -109,6 +109,17 @@ def format_duration(seconds: float) -> str:
     return f"{hours}h {rem_min}m"
 
 
+def format_count(n: int) -> str:
+    """Abbreviate a row count for compact display (1234 → '1.2K', 1.2e6 → '1.2M')."""
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        return f"{n / 1000:.1f}K"
+    if n < 1_000_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    return f"{n / 1_000_000_000:.1f}B"
+
+
 def format_relative(ts: datetime, now: datetime | None = None) -> str:
     """Render a timestamp as a coarse 'N units ago' string."""
     now = now or datetime.now(tz=ts.tzinfo)

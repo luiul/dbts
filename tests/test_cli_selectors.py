@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dbts.cli import _promote_selectors
+from pathlib import Path
+
+from dbts.cli import _is_html_path, _promote_selectors
 
 
 def test_bare_positional_promoted():
@@ -134,3 +136,17 @@ def test_target_flag_does_not_change_selector_mode():
         "--select",
         "foo+",
     ]
+
+
+# ----- _is_html_path ------------------------------------------------------- #
+
+
+def test_is_html_path_true_for_html_suffix():
+    assert _is_html_path(Path("dag.html"))
+    assert _is_html_path(Path("/tmp/Report.HTML"))
+
+
+def test_is_html_path_false_for_other_or_none():
+    assert not _is_html_path(None)
+    assert not _is_html_path(Path("graph.svg"))
+    assert not _is_html_path(Path("plan"))
